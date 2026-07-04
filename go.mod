@@ -42,7 +42,7 @@ require (
 	github.com/sagernet/gvisor v0.0.0-20250811.0-sing-box-mod.1
 	github.com/sagernet/quic-go v0.59.0-sing-box-mod.4
 	github.com/sagernet/sing v0.8.12-0.20260727093221-6a8f0ea47052
-	github.com/sagernet/sing-cloudflared v0.1.1
+	github.com/sagernet/sing-cloudflared v0.1.2
 	github.com/sagernet/sing-mux v0.3.5
 	github.com/sagernet/sing-quic v0.6.4-0.20260727030926-0b32a5074a40
 	github.com/sagernet/sing-shadowsocks v0.2.8
