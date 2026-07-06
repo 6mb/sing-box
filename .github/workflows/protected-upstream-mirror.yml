@@ -1,0 +1,50 @@
+name: Protected Upstream Mirror
+
+on:
+  schedule:
+    - cron: '43 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      max_assets:
+        description: Maximum release assets to upload in this run; 0 means no limit.
+        required: false
+        default: '300'
+      max_asset_bytes:
+        description: Maximum release asset bytes to upload in this run; 0 means no limit.
+        required: false
+        default: '8589934592'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: protected-upstream-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: Mirror upstream with delete protection
+    if: github.repository == '6mb/sing-box'
+    runs-on: ubuntu-latest
+
+    env:
+      SOURCE_REPO: SagerNet/sing-box
+      TARGET_REPO: ${{ github.repository }}
+      CONTROL_BRANCH: backup-control
+      BACKUP_PREFIX: backups
+      MIN_TREE_ENTRIES: '100'
+      MIN_TAG_COUNT: '10'
+      MIN_RELEASE_COUNT: '5'
+      RELEASE_LIMIT: '5'
+      REQUIRED_PATHS: 'README.md go.mod cmd common option route transport'
+      MAX_ASSETS_PER_RUN: ${{ github.event.inputs.max_assets || '300' }}
+      MAX_ASSET_BYTES_PER_RUN: ${{ github.event.inputs.max_asset_bytes || '8589934592' }}
+
+    steps:
+      - name: Checkout control branch
+        uses: actions/checkout@v4
+
+      - name: Mirror upstream
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/protected-upstream-mirror.sh
