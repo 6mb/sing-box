@@ -16,7 +16,6 @@ import (
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
-	"github.com/sagernet/sing-box/route/rule"
 	"github.com/sagernet/sing-tun"
 	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -460,34 +459,8 @@ func (t *Inbound) Close() error {
 	)
 }
 
-func (t *Inbound) PrepareConnection(network string, source M.Socksaddr, destination M.Socksaddr, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	var ipVersion uint8
-	if !destination.IsIPv6() {
-		ipVersion = 4
-	} else {
-		ipVersion = 6
-	}
-	routeDestination, err := t.router.PreMatch(adapter.InboundContext{
-		Inbound:     t.tag,
-		InboundType: C.TypeTun,
-		IPVersion:   ipVersion,
-		Network:     network,
-		Source:      source,
-		Destination: destination,
-	}, routeContext, timeout, false)
-	if err != nil {
-		switch {
-		case rule.IsBypassed(err):
-			err = nil
-		case rule.IsRejected(err):
-			t.logger.Trace("reject ", network, " connection from ", source.AddrString(), " to ", destination.AddrString())
-		default:
-			if network == N.NetworkICMP {
-				t.logger.Warn(E.Cause(err, "link ", network, " connection from ", source.AddrString(), " to ", destination.AddrString()))
-			}
-		}
-	}
-	return routeDestination, err
+func (t *Inbound) JudgeFlow(network uint8, source netip.AddrPort, destination netip.AddrPort) tun.FlowVerdict {
+	return adapter.JudgeFlow(t.router, t.tag, C.TypeTun, network, source, destination)
 }
 
 func (t *Inbound) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
@@ -534,34 +507,8 @@ func (t *Inbound) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 
 type autoRedirectHandler Inbound
 
-func (t *autoRedirectHandler) PrepareConnection(network string, source M.Socksaddr, destination M.Socksaddr, routeContext tun.DirectRouteContext, timeout time.Duration) (tun.DirectRouteDestination, error) {
-	var ipVersion uint8
-	if !destination.IsIPv6() {
-		ipVersion = 4
-	} else {
-		ipVersion = 6
-	}
-	routeDestination, err := t.router.PreMatch(adapter.InboundContext{
-		Inbound:     t.tag,
-		InboundType: C.TypeTun,
-		IPVersion:   ipVersion,
-		Network:     network,
-		Source:      source,
-		Destination: destination,
-	}, routeContext, timeout, true)
-	if err != nil {
-		switch {
-		case rule.IsBypassed(err):
-			t.logger.Trace("bypass ", network, " connection from ", source.AddrString(), " to ", destination.AddrString())
-		case rule.IsRejected(err):
-			t.logger.Trace("reject ", network, " connection from ", source.AddrString(), " to ", destination.AddrString())
-		default:
-			if network == N.NetworkICMP {
-				t.logger.Warn(E.Cause(err, "link ", network, " connection from ", source.AddrString(), " to ", destination.AddrString()))
-			}
-		}
-	}
-	return routeDestination, err
+func (t *autoRedirectHandler) JudgeFlow(network uint8, source netip.AddrPort, destination netip.AddrPort) tun.FlowVerdict {
+	return (*Inbound)(t).JudgeFlow(network, source, destination)
 }
 
 func (t *autoRedirectHandler) NewConnectionEx(ctx context.Context, conn net.Conn, source M.Socksaddr, destination M.Socksaddr, onClose N.CloseHandlerFunc) {
