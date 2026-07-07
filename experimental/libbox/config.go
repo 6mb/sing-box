@@ -181,6 +181,14 @@ func (s *platformInterfaceStub) TailscaleHostname() string {
 	return ""
 }
 
+func (s *platformInterfaceStub) UsePlatformBridge() bool {
+	return false
+}
+
+func (s *platformInterfaceStub) CreateBridge(mtu uint32) (int, string, error) {
+	return 0, "", os.ErrInvalid
+}
+
 func (s *platformInterfaceStub) LookupUser(username string) (*adapter.PlatformUser, error) {
 	return nil, os.ErrInvalid
 }

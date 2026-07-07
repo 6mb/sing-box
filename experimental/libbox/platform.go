@@ -27,6 +27,13 @@ type PlatformInterface interface {
 	LookupSFTPServer() (string, error)
 	ReadSystemSSHHostKey() (string, error)
 	TailscaleHostname() string
+	UsePlatformBridge() bool
+	CreateBridge(mtu int32) (*Bridge, error)
+}
+
+type Bridge struct {
+	FileDescriptor int32
+	Name           string
 }
 
 type PlatformUser struct {

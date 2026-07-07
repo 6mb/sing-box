@@ -285,6 +285,18 @@ func (w *platformInterfaceWrapper) TailscaleHostname() string {
 	return w.iif.TailscaleHostname()
 }
 
+func (w *platformInterfaceWrapper) UsePlatformBridge() bool {
+	return w.iif.UsePlatformBridge()
+}
+
+func (w *platformInterfaceWrapper) CreateBridge(mtu uint32) (int, string, error) {
+	bridge, err := w.iif.CreateBridge(int32(mtu))
+	if err != nil {
+		return 0, "", err
+	}
+	return int(bridge.FileDescriptor), bridge.Name, nil
+}
+
 func (w *platformInterfaceWrapper) LookupUser(username string) (*adapter.PlatformUser, error) {
 	platformUser, err := w.iif.LookupUser(username)
 	if err != nil {
