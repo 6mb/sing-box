@@ -46,5 +46,5 @@ jobs:
 
       - name: Mirror upstream
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.MIRROR_TOKEN || github.token }}
         run: ./.github/scripts/protected-upstream-mirror.sh
