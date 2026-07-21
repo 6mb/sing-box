@@ -1230,6 +1230,8 @@ jobs:
             -authenticationKeyPath $ASC_KEY_PATH \
             -authenticationKeyID $ASC_KEY_ID \
             -authenticationKeyIssuerID $ASC_KEY_ISSUER_ID
+        env:
+          DISABLE_SWIFTLINT: "1"
       - name: Upload to App Store Connect
         if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch'
         run: |-
@@ -1266,6 +1268,8 @@ jobs:
           cp clients/apple/build/SFM-Intel.pkg "dist/SFM-${VERSION}-Intel.pkg"
           cp clients/apple/build/SFM-Universal.pkg "dist/SFM-${VERSION}-Universal.pkg"
           cp clients/apple/build/SFM.System-universal.xcarchive/SFM.dSYMs.zip "dist/SFM-${VERSION}.dSYMs.zip"
+        env:
+          DISABLE_SWIFTLINT: "1"
       - name: Build jailbreak package
         if: matrix.if && matrix.type == 'jailbreak'
         run: |-
