@@ -132,10 +132,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
-          cache-dependency-path: |
-            go.sum
-            release/DEFAULT_BUILD_TAGS
-            release/DEFAULT_BUILD_TAGS_OTHERS
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-linux-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-linux-
       - name: Cache Go for Windows 7
         if: matrix.legacy_win7
         id: cache-go-for-windows7
@@ -177,17 +180,6 @@ jobs:
           rm -f ~/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
           cd ~/cronet-go
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
-      - name: Cache Chromium toolchain
-        if: matrix.naive
-        id: cache-chromium-toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/cronet-go/naiveproxy/src/third_party/llvm-build/
-            ~/cronet-go/naiveproxy/src/gn/out/
-            ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
-            ~/cronet-go/naiveproxy/src/out/sysroot-build/
-          key: chromium-toolchain-linux-${{ matrix.arch }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
       - name: Download Chromium toolchain
         if: matrix.naive
         run: |
@@ -477,10 +469,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.3
-          cache-dependency-path: |
-            go.sum
-            release/DEFAULT_BUILD_TAGS
-            release/DEFAULT_BUILD_TAGS_OTHERS
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-macos-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-macos-
       - name: Cache Go for macOS 10.13
         if: matrix.legacy_osx
         id: cache-go-for-macos1013
@@ -573,10 +568,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.4
-          cache-dependency-path: |
-            go.sum
-            release/DEFAULT_BUILD_TAGS_WINDOWS
-            release/DEFAULT_BUILD_TAGS_OTHERS
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-windows-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-windows-
       - name: Set tag
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
@@ -680,12 +678,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
-          key: libbox-go-modules-linux-1.25.12-${{ hashFiles('go.sum') }}
-      - name: Cache Go build
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/go-build
-          key: libbox-go-build-android-${{ matrix.go_arch }}-1.25.12-${{ hashFiles('go.sum') }}
+          key: go-mod-linux-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-linux-
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -743,10 +737,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
-          cache-dependency-path: |
-            go.sum
-            clients/android/gradle/libs.versions.toml
-            clients/android/gradle/wrapper/gradle-wrapper.properties
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-linux-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-linux-
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -842,10 +839,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
-          cache-dependency-path: |
-            go.sum
-            clients/android/gradle/libs.versions.toml
-            clients/android/gradle/wrapper/gradle-wrapper.properties
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-linux-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-linux-
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -948,12 +948,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
-          key: boxdd-go-modules-windows-1.25.12-${{ hashFiles('go.sum') }}
+          key: go-mod-desktop-windows-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-desktop-windows-
       - name: Cache boxdd build
         uses: actions/cache@v4
         with:
           path: ~/AppData/Local/go-build
           key: boxdd-go-build-windows-${{ matrix.desktop_arch }}-1.25.12-${{ hashFiles('go.sum', 'release/DEFAULT_BUILD_TAGS_WINDOWS', 'release/DEFAULT_BUILD_TAGS_OTHERS') }}
+          restore-keys: boxdd-go-build-windows-${{ matrix.desktop_arch }}-1.25.12-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.88.0
         with:
@@ -966,6 +968,7 @@ jobs:
             ~/.cargo/registry
             clients/desktop/bin/windows-share-toolchain/cargo-target
           key: windows-share-${{ matrix.rust_target }}-${{ hashFiles('clients/desktop/native/windows-share/Cargo.lock') }}
+          restore-keys: windows-share-${{ matrix.rust_target }}-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -1055,9 +1058,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
-          cache-dependency-path: |
-            go.sum
-            clients/desktop/pnpm-lock.yaml
+          cache: false
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-desktop-linux-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-desktop-linux-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -1097,15 +1104,6 @@ jobs:
           rm -f ~/cronet-go/naiveproxy/src/build/linux/sysroot_scripts/keyring.gpg
           cd ~/cronet-go
           GPG_TTY=/dev/null ./naiveproxy/src/build/linux/sysroot_scripts/generate_keyring.sh
-      - name: Cache Chromium toolchain
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/cronet-go/naiveproxy/src/third_party/llvm-build/
-            ~/cronet-go/naiveproxy/src/gn/out/
-            ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
-            ~/cronet-go/naiveproxy/src/out/sysroot-build/
-          key: chromium-toolchain-linux-${{ matrix.go_arch }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
       - name: Download Chromium toolchain
         run: |-
           set -xeuo pipefail
@@ -1224,13 +1222,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/pkg/mod
-          key: libbox-go-modules-macos-1.25.12-${{ hashFiles('go.sum') }}
+          key: go-mod-macos-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-macos-
       - name: Cache Go build
         if: matrix.build
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/go-build
           key: libbox-go-build-${{ matrix.artifact }}-1.25.12-${{ hashFiles('go.sum') }}
+          restore-keys: libbox-go-build-${{ matrix.artifact }}-1.25.12-
       - name: Set tag
         if: matrix.build
         run: git tag v${{ needs.calculate_version.outputs.version }} -f
@@ -1323,10 +1323,11 @@ jobs:
           cache: false
       - name: Cache Go modules
         if: matrix.if
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/go/pkg/mod
-          key: libbox-go-modules-macos-1.25.12-${{ hashFiles('go.sum') }}
+          key: go-mod-macos-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-macos-
       - name: Set tag
         if: matrix.if
         run: |-
@@ -1347,15 +1348,20 @@ jobs:
         if: matrix.if
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/SourcePackages
-          key: apple-swift-packages-${{ matrix.platform }}-${{ hashFiles('clients/apple/sing-box.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          path: |
+            ${{ runner.temp }}/SourcePackages/repositories
+            ${{ runner.temp }}/SourcePackages/artifacts
+          key: apple-spm-${{ hashFiles('clients/apple/sing-box.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: apple-spm-
       - name: Cache Xcode build data
-        if: matrix.if
+        if: matrix.if && matrix.type != 'jailbreak' && matrix.variant != 'universal'
         uses: actions/cache@v4
         with:
-          path: ${{ matrix.type == 'standalone' && 'clients/apple/build/SFM.System-*.dd' || matrix.type == 'jailbreak' && '~/Library/Developer/Xcode/DerivedData' || format('{0}/DerivedData', runner.temp) }}
+          path: ${{ matrix.type == 'standalone' && 'clients/apple/build/SFM.System-*.dd' || format('{0}/DerivedData', runner.temp) }}
           key: apple-derived-data-${{ matrix.type }}-${{ matrix.platform }}-${{ matrix.variant || 'default' }}-${{ hashFiles('clients/apple/sing-box.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-${{ github.sha }}
-          restore-keys: apple-derived-data-${{ matrix.type }}-${{ matrix.platform }}-${{ matrix.variant || 'default' }}-${{ hashFiles('clients/apple/sing-box.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-
+          restore-keys: |
+            apple-derived-data-${{ matrix.type }}-${{ matrix.platform }}-${{ matrix.variant || 'default' }}-${{ hashFiles('clients/apple/sing-box.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}-
+            apple-derived-data-${{ matrix.type }}-${{ matrix.platform }}-${{ matrix.variant || 'default' }}-
       - name: Setup App Store Connect key
         if: matrix.if && matrix.type != 'jailbreak' && github.event_name == 'workflow_dispatch'
         run: |-
@@ -1552,6 +1558,12 @@ jobs:
           cp "clients/apple/build/jailbreak/SFI-${VERSION}-iphoneos-arm64.deb" dist
         env:
           XCODEBUILD_CLONED_SOURCE_PACKAGES_DIR_PATH: ${{ runner.temp }}/SourcePackages
+      - name: Report cache directory sizes
+        if: matrix.if
+        run: |-
+          du -sh "$RUNNER_TEMP/SourcePackages"/* 2>/dev/null || true
+          du -sh "$RUNNER_TEMP/DerivedData" 2>/dev/null || true
+          du -sh clients/apple/build/SFM.System-*.dd 2>/dev/null || true
       - name: Upload release artifact
         if: matrix.if && (matrix.type == 'standalone' || matrix.type == 'jailbreak')
         uses: actions/upload-artifact@v4
@@ -1626,3 +1638,71 @@ jobs:
           ghr --replace -p 5 "v${VERSION}" dist
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  cache_gc:
+    name: Cache GC
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    needs:
+      - build
+      - build_darwin
+      - build_windows
+      - build_android_library
+      - build_android
+      - build_windows_client
+      - build_linux_client
+      - build_apple_library
+      - build_apple
+      - upload
+    steps:
+      - name: Delete superseded caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/caches?per_page=100" --paginate \
+            --jq '.actions_caches[] | [.id, .ref, .created_at, .last_accessed_at, .size_in_bytes, .key] | @tsv' > "$RUNNER_TEMP/caches.tsv"
+          python3 - "$GITHUB_REPOSITORY" "$RUNNER_TEMP/caches.tsv" <<'EOF'
+          import re
+          import subprocess
+          import sys
+
+          repository, list_path = sys.argv[1], sys.argv[2]
+          budget = 9 * 1024 * 1024 * 1024
+          rows = []
+          with open(list_path) as list_file:
+              for line in list_file:
+                  cache_id, ref, created_at, accessed_at, size, key = line.rstrip("\n").split("\t")
+                  family = key
+                  while True:
+                      stripped = re.sub(r"-[0-9a-f]{16,}$", "", family)
+                      if stripped == family:
+                          break
+                      family = stripped
+                  rows.append({
+                      "id": cache_id, "ref": ref, "created": created_at,
+                      "accessed": accessed_at, "size": int(size), "key": key,
+                      "family": family,
+                  })
+          newest = {}
+          for row in rows:
+              group = (row["ref"], row["family"])
+              if group not in newest or row["created"] > newest[group]["created"]:
+                  newest[group] = row
+          doomed = [row for row in rows if newest[(row["ref"], row["family"])] is not row]
+          kept = [row for row in rows if newest[(row["ref"], row["family"])] is row]
+          total = sum(row["size"] for row in kept)
+          for row in sorted(kept, key=lambda entry: entry["accessed"]):
+              if total <= budget:
+                  break
+              doomed.append(row)
+              total -= row["size"]
+          for row in doomed:
+              print(f"delete {row['size'] >> 20}MB {row['key']} ({row['ref']})")
+              subprocess.run(
+                  ["gh", "api", "-X", "DELETE", f"repos/{repository}/actions/caches/{row['id']}"],
+                  check=False,
+              )
+          print(f"kept {len(rows) - len(doomed)} caches, {total >> 20}MB total")
+          EOF
