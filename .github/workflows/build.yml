@@ -1199,6 +1199,10 @@ jobs:
         if: matrix.if && matrix.type == 'jailbreak'
         run: |-
           brew install dpkg ldid
+      - name: Trust standalone build plugins
+        if: matrix.if && matrix.type == 'standalone'
+        run: |-
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
       - name: Build library
         if: matrix.if
         run: |-
