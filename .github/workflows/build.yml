@@ -24,6 +24,7 @@ on:
           - macOS
           - tvOS
           - macOS-standalone
+          - iOS-jailbreak
           - publish-android
   push:
     branches:
@@ -1042,14 +1043,16 @@ jobs:
   build_apple:
     name: Build Apple clients
     runs-on: macos-26
-    if: false # github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'app-store' || inputs.build == 'iOS' || inputs.build == 'macOS' || inputs.build == 'tvOS' || inputs.build == 'macOS-standalone'
+    if: github.event_name == 'workflow_dispatch' && (inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'app-store' || inputs.build == 'iOS' || inputs.build == 'macOS' || inputs.build == 'tvOS' || inputs.build == 'macOS-standalone' || inputs.build == 'iOS-jailbreak')
     needs:
       - calculate_version
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: iOS
             if: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'app-store'|| inputs.build == 'iOS' }}
+            type: app-store
             platform: ios
             scheme: SFI
             destination: 'generic/platform=iOS'
@@ -1057,6 +1060,7 @@ jobs:
             upload: SFI/Upload.plist
           - name: macOS
             if: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'app-store'|| inputs.build == 'macOS' }}
+            type: app-store
             platform: macos
             scheme: SFM
             destination: 'generic/platform=macOS'
@@ -1064,6 +1068,7 @@ jobs:
             upload: SFI/Upload.plist
           - name: tvOS
             if: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'app-store'|| inputs.build == 'tvOS' }}
+            type: app-store
             platform: tvos
             scheme: SFT
             destination: 'generic/platform=tvOS'
@@ -1071,12 +1076,12 @@ jobs:
             upload: SFI/Upload.plist
           - name: macOS-standalone
             if: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'macOS-standalone' }}
+            type: standalone
             platform: macos
-            scheme: SFM.System
-            destination: 'generic/platform=macOS'
-            archive: build/SFM.System.xcarchive
-            export: SFM.System/Export.plist
-            export_path: build/SFM.System
+          - name: iOS-jailbreak
+            if: ${{ github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Apple' || inputs.build == 'iOS-jailbreak' }}
+            type: jailbreak
+            platform: ios
     steps:
       - name: Checkout
         if: matrix.if
@@ -1105,45 +1110,54 @@ jobs:
         run: |-
           cd clients/apple
           git checkout dev
-      - name: Setup certificates
-        if: matrix.if
+      - name: Setup App Store Connect key
+        if: matrix.if && matrix.type != 'jailbreak'
         run: |-
-          CERTIFICATE_PATH=$RUNNER_TEMP/Certificates.p12
-          KEYCHAIN_PATH=$RUNNER_TEMP/certificates.keychain-db
-          echo -n "$CERTIFICATES_P12" | base64 --decode -o $CERTIFICATE_PATH
+          ASC_KEY_PATH=$RUNNER_TEMP/AuthKey.p8
+          echo -n "$ASC_KEY" | base64 --decode -o $ASC_KEY_PATH
+          echo "ASC_KEY_PATH=$ASC_KEY_PATH" >> "$GITHUB_ENV"
+          echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
+          echo "ASC_KEY_ISSUER_ID=$ASC_KEY_ISSUER_ID" >> "$GITHUB_ENV"
+        env:
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+      - name: Install standalone provisioning profiles
+        if: matrix.if && matrix.type == 'standalone'
+        run: |-
+          PROFILES_ZIP_PATH=$RUNNER_TEMP/Profiles.zip
+          echo -n "$PROVISIONING_PROFILES" | base64 --decode -o $PROFILES_ZIP_PATH
+          PROFILES_PATH="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+          mkdir -p "$PROFILES_PATH"
+          unzip $PROFILES_ZIP_PATH -d "$PROFILES_PATH"
+        env:
+          PROVISIONING_PROFILES: ${{ secrets.PROVISIONING_PROFILES }}
+      - name: Setup Developer ID certificates
+        if: matrix.if && matrix.type == 'standalone'
+        run: |-
+          CERTIFICATE_PATH=$RUNNER_TEMP/DeveloperIDCertificates.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/developer-id.keychain-db
+          echo -n "$DEVELOPER_ID_CERTIFICATES_P12" | base64 --decode -o $CERTIFICATE_PATH
           security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-
-          PROFILES_ZIP_PATH=$RUNNER_TEMP/Profiles.zip
-          echo -n "$PROVISIONING_PROFILES" | base64 --decode -o $PROFILES_ZIP_PATH
-
-          PROFILES_PATH="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$PROFILES_PATH"
-          unzip $PROFILES_ZIP_PATH -d "$PROFILES_PATH"
-
-          ASC_KEY_PATH=$RUNNER_TEMP/Key.p12
-          echo -n "$ASC_KEY" | base64 --decode -o $ASC_KEY_PATH
-
+          security list-keychains -d user -s $KEYCHAIN_PATH
+          security default-keychain -d user -s $KEYCHAIN_PATH
           xcrun notarytool store-credentials "notarytool-password" \
             --key $ASC_KEY_PATH \
             --key-id $ASC_KEY_ID \
-            --issuer $ASC_KEY_ISSUER_ID
-
-          echo "ASC_KEY_PATH=$ASC_KEY_PATH" >> "$GITHUB_ENV"
-          echo "ASC_KEY_ID=$ASC_KEY_ID" >> "$GITHUB_ENV"
-          echo "ASC_KEY_ISSUER_ID=$ASC_KEY_ISSUER_ID" >> "$GITHUB_ENV"
+            --issuer $ASC_KEY_ISSUER_ID \
+            --keychain $KEYCHAIN_PATH
         env:
-          CERTIFICATES_P12: ${{ secrets.CERTIFICATES_P12 }}
-          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ secrets.P12_PASSWORD }}
-          PROVISIONING_PROFILES: ${{ secrets.PROVISIONING_PROFILES }}
-          ASC_KEY: ${{ secrets.ASC_KEY }}
-          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-          ASC_KEY_ISSUER_ID: ${{ secrets.ASC_KEY_ISSUER_ID }}
+          DEVELOPER_ID_CERTIFICATES_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATES_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+      - name: Install jailbreak packaging tools
+        if: matrix.if && matrix.type == 'jailbreak'
+        run: |-
+          brew install dpkg ldid
       - name: Build library
         if: matrix.if
         run: |-
@@ -1161,8 +1175,8 @@ jobs:
         if: matrix.if && matrix.name != 'iOS'
         run: |-
           go run -v ./cmd/internal/update_apple_version --ci
-      - name: Build
-        if: matrix.if
+      - name: Archive App Store build
+        if: matrix.if && matrix.type == 'app-store'
         run: |-
           cd clients/apple
           xcodebuild archive \
@@ -1175,7 +1189,7 @@ jobs:
             -authenticationKeyID $ASC_KEY_ID \
             -authenticationKeyIssuerID $ASC_KEY_ISSUER_ID
       - name: Upload to App Store Connect
-        if: matrix.if && matrix.name != 'macOS-standalone' && github.event_name == 'workflow_dispatch'
+        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch'
         run: |-
           go run -v ./cmd/internal/app_store_connect cancel_app_store ${{ matrix.platform }}
           cd clients/apple
@@ -1187,44 +1201,44 @@ jobs:
             -authenticationKeyID $ASC_KEY_ID \
             -authenticationKeyIssuerID $ASC_KEY_ISSUER_ID
       - name: Publish to TestFlight
-        if: matrix.if && matrix.name != 'macOS-standalone' && github.event_name == 'workflow_dispatch' && github.ref =='refs/heads/testing'
+        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing'
         run: |-
           go run -v ./cmd/internal/app_store_connect publish_testflight ${{ matrix.platform }}
-      - name: Build image
-        if: matrix.if && matrix.name == 'macOS-standalone' && github.event_name == 'workflow_dispatch'
+      - name: Build standalone packages
+        if: matrix.if && matrix.type == 'standalone'
         run: |-
-          pushd clients/apple
-          xcodebuild -exportArchive \
-          	-archivePath "${{ matrix.archive }}" \
-          	-exportOptionsPlist ${{ matrix.export }} \
-          	-exportPath "${{ matrix.export_path }}"
-          brew install create-dmg
-          create-dmg \
-          	--volname "sing-box" \
-          	--volicon "${{ matrix.export_path }}/SFM.app/Contents/Resources/AppIcon.icns" \
-          	--icon "SFM.app" 0 0 \
-          		--hide-extension "SFM.app" \
-          		--app-drop-link 0 0 \
-          		--skip-jenkins \
-          	SFM.dmg "${{ matrix.export_path }}/SFM.app"
-          xcrun notarytool submit "SFM.dmg" --wait --keychain-profile "notarytool-password"
-          cd "${{ matrix.archive }}"
+          make -C clients/apple build_macos_pkg
+          make -C clients/apple notarize_macos_pkg
+          pushd clients/apple/build/SFM.System-universal.xcarchive
           zip -r SFM.dSYMs.zip dSYMs
           popd
 
           mkdir -p dist
-          cp clients/apple/SFM.dmg "dist/SFM-${VERSION}-universal.dmg"
-          cp "clients/apple/${{ matrix.archive }}/SFM.dSYMs.zip" "dist/SFM-${VERSION}-universal.dSYMs.zip"
-      - name: Upload image
-        if: matrix.if && matrix.name == 'macOS-standalone' && github.event_name == 'workflow_dispatch'
+          cp clients/apple/build/SFM-Apple.pkg "dist/SFM-${VERSION}-Apple.pkg"
+          cp clients/apple/build/SFM-Intel.pkg "dist/SFM-${VERSION}-Intel.pkg"
+          cp clients/apple/build/SFM-Universal.pkg "dist/SFM-${VERSION}-Universal.pkg"
+          cp clients/apple/build/SFM.System-universal.xcarchive/SFM.dSYMs.zip "dist/SFM-${VERSION}.dSYMs.zip"
+      - name: Build jailbreak package
+        if: matrix.if && matrix.type == 'jailbreak'
+        run: |-
+          make -C clients/apple build_ios_deb
+          mkdir -p dist
+          cp "clients/apple/build/jailbreak/SFI-${VERSION}-iphoneos-arm64.deb" dist
+      - name: Upload release artifact
+        if: matrix.if && (matrix.type == 'standalone' || matrix.type == 'jailbreak')
         uses: actions/upload-artifact@v4
         with:
-          name: binary-macos-dmg
+          name: binary-apple-${{ matrix.type }}
           path: 'dist'
   upload:
     name: Upload builds
-    if: "!failure() && github.event_name == 'workflow_dispatch' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'Windows' || inputs.build == 'Linux' || inputs.build == 'Apple' || inputs.build == 'macOS-standalone')"
+    if: "!failure() && github.event_name == 'workflow_dispatch' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'Windows' || inputs.build == 'Linux' || inputs.build == 'Apple' || inputs.build == 'macOS-standalone' || inputs.build == 'iOS-jailbreak')"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     needs:
       - calculate_version
       - build
@@ -1263,6 +1277,10 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Attest build provenance
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: 'dist/**'
       - name: Upload builds
         if: ${{ env.PUBLISHED == 'false' }}
         run: |-
