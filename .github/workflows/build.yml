@@ -51,6 +51,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache: false
       - name: Check input version
         if: github.event_name == 'workflow_dispatch'
         run: |-
@@ -122,12 +123,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup Go
         if: ${{ ! matrix.legacy_win7 }}
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            release/DEFAULT_BUILD_TAGS
+            release/DEFAULT_BUILD_TAGS_OTHERS
       - name: Cache Go for Windows 7
         if: matrix.legacy_win7
         id: cache-go-for-windows7
@@ -180,7 +185,7 @@ jobs:
             ~/cronet-go/naiveproxy/src/gn/out/
             ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
             ~/cronet-go/naiveproxy/src/out/sysroot-build/
-          key: chromium-toolchain-${{ matrix.arch }}-${{ matrix.variant }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
+          key: chromium-toolchain-linux-${{ matrix.arch }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
       - name: Download Chromium toolchain
         if: matrix.naive
         run: |
@@ -464,12 +469,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup Go
         if: ${{ ! matrix.legacy_osx }}
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.3
+          cache-dependency-path: |
+            go.sum
+            release/DEFAULT_BUILD_TAGS
+            release/DEFAULT_BUILD_TAGS_OTHERS
       - name: Cache Go for macOS 10.13
         if: matrix.legacy_osx
         id: cache-go-for-macos1013
@@ -557,11 +566,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: ^1.25.4
+          cache-dependency-path: |
+            go.sum
+            release/DEFAULT_BUILD_TAGS_WINDOWS
+            release/DEFAULT_BUILD_TAGS_OTHERS
       - name: Set tag
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$env:GITHUB_ENV"
@@ -647,21 +660,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
-          submodules: 'recursive'
+          fetch-depth: 1
+      - name: Checkout Android client
+        run: git submodule update --init clients/android
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            clients/android/gradle/libs.versions.toml
+            clients/android/gradle/wrapper/gradle-wrapper.properties
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r28
+          local-cache: true
       - name: Setup OpenJDK
-        run: |-
-          sudo apt update && sudo apt install -y openjdk-17-jdk-headless
-          /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: 17
       - name: Set tag
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
@@ -672,7 +692,6 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           make lib_android
         env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       - name: Checkout main branch
         if: github.ref == 'refs/heads/stable' && github.event_name != 'workflow_dispatch'
@@ -688,11 +707,10 @@ jobs:
         run: |-
           cd clients/android
           git submodule update --init --recursive -v
-      - name: Gradle cache
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
-          path: ~/.gradle
-          key: gradle-${{ hashFiles('**/*.gradle') }}
+          cache-provider: basic
       - name: Update version
         if: github.event_name == 'workflow_dispatch'
         run: |-
@@ -706,9 +724,8 @@ jobs:
           mkdir clients/android/app/libs
           cp *.aar clients/android/app/libs
           cd clients/android
-          ./gradlew :app:assembleOtherRelease :app:assembleOtherLegacyRelease
+          ./gradlew --build-cache --parallel :app:assembleOtherRelease :app:assembleOtherLegacyRelease
         env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           LOCAL_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
       - name: Prepare upload
@@ -741,21 +758,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
-          submodules: 'recursive'
+          fetch-depth: 1
+      - name: Checkout Android client
+        run: git submodule update --init clients/android
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            clients/android/gradle/libs.versions.toml
+            clients/android/gradle/wrapper/gradle-wrapper.properties
       - name: Setup Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r28
+          local-cache: true
       - name: Setup OpenJDK
-        run: |-
-          sudo apt update && sudo apt install -y openjdk-17-jdk-headless
-          /usr/lib/jvm/java-17-openjdk-amd64/bin/java --version
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: 17
       - name: Set tag
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
@@ -766,7 +790,6 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           make lib_android
         env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       - name: Checkout main branch
         if: github.ref == 'refs/heads/stable' && github.event_name != 'workflow_dispatch'
@@ -778,11 +801,10 @@ jobs:
         run: |-
           cd clients/android
           git checkout dev
-      - name: Gradle cache
-        uses: actions/cache@v4
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
         with:
-          path: ~/.gradle
-          key: gradle-${{ hashFiles('**/*.gradle') }}
+          cache-provider: basic
       - name: Build
         run: |-
           go run -v ./cmd/internal/update_android_version --ci
@@ -790,32 +812,47 @@ jobs:
           cp *.aar clients/android/app/libs
           cd clients/android
           echo -n "$SERVICE_ACCOUNT_CREDENTIALS" | base64 --decode > service-account-credentials.json
-          ./gradlew :app:publishPlayReleaseBundle
+          ./gradlew --build-cache --parallel :app:publishPlayReleaseBundle
         env:
-          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           LOCAL_PROPERTIES: ${{ secrets.LOCAL_PROPERTIES }}
           SERVICE_ACCOUNT_CREDENTIALS: ${{ secrets.SERVICE_ACCOUNT_CREDENTIALS }}
   build_windows_client:
-    name: Build Windows client
+    name: Build Windows client (${{ matrix.desktop_arch }})
     if: (github.event_name != 'workflow_dispatch' || inputs.build == 'All' || inputs.build == 'Windows') && github.ref != 'refs/heads/oldstable'
     runs-on: windows-latest
     needs:
       - calculate_version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { desktop_arch: x64, rust_target: x86_64-pc-windows-msvc }
+          - { desktop_arch: x86, rust_target: i686-pc-windows-msvc }
+          - { desktop_arch: arm64, rust_target: aarch64-pc-windows-msvc }
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
-          submodules: 'recursive'
+          fetch-depth: 1
+      - name: Checkout desktop client
+        run: git submodule update --init clients/desktop
+      - name: Checkout main branch
+        if: github.ref == 'refs/heads/testing'
+        run: git -C clients/desktop checkout main
+      - name: Checkout desktop submodules
+        run: git -C clients/desktop submodule update --init --recursive
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            clients/desktop/pnpm-lock.yaml
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.88.0
         with:
-          targets: i686-pc-windows-msvc,aarch64-pc-windows-msvc
+          targets: ${{ matrix.rust_target }}
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -835,13 +872,6 @@ jobs:
             "PUBLISHED=false" >> $env:GITHUB_ENV
           }
           git tag v${{ needs.calculate_version.outputs.version }} -f
-      - name: Checkout main branch
-        if: github.ref == 'refs/heads/testing'
-        run: |-
-          git -C clients/desktop checkout main
-      - name: Checkout submodule recursive
-        run: |-
-          git -C clients/desktop submodule update --init --recursive
       - name: Update version
         if: github.event_name == 'workflow_dispatch'
         run: |-
@@ -868,21 +898,21 @@ jobs:
           pnpm -C clients/desktop install
       - name: Build
         run: |-
-          pnpm -C clients/desktop package:win
+          pnpm -C clients/desktop package:win -- ${{ matrix.desktop_arch }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Prepare upload
         run: |-
           $artifacts = @(Get-ChildItem clients/desktop/release/SFW-*.exe -File)
-          if ($artifacts.Count -ne 3) {
-            throw "expected 3 Windows installers, found $($artifacts.Count)"
+          if ($artifacts.Count -ne 1) {
+            throw "expected 1 Windows installer for ${{ matrix.desktop_arch }}, found $($artifacts.Count)"
           }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item $artifacts.FullName dist
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: binary-windows-client
+          name: binary-windows-client-${{ matrix.desktop_arch }}
           path: 'dist'
   build_linux_client:
     name: Build Linux client (${{ matrix.desktop_arch }})
@@ -900,12 +930,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
-          submodules: 'recursive'
+          fetch-depth: 1
+      - name: Checkout desktop client
+        run: git submodule update --init clients/desktop
+      - name: Checkout main branch
+        if: github.ref == 'refs/heads/testing'
+        run: git -C clients/desktop checkout main
+      - name: Checkout desktop submodules
+        run: git -C clients/desktop submodule update --init --recursive
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            clients/desktop/pnpm-lock.yaml
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -922,13 +961,6 @@ jobs:
         run: |-
           git ls-remote --exit-code --tags origin v${{ needs.calculate_version.outputs.version }} || echo "PUBLISHED=false" >> "$GITHUB_ENV"
           git tag v${{ needs.calculate_version.outputs.version }} -f
-      - name: Checkout main branch
-        if: github.ref == 'refs/heads/testing'
-        run: |-
-          git -C clients/desktop checkout main
-      - name: Checkout submodule recursive
-        run: |-
-          git -C clients/desktop submodule update --init --recursive
       - name: Update version
         if: github.event_name == 'workflow_dispatch'
         run: |-
@@ -960,7 +992,7 @@ jobs:
             ~/cronet-go/naiveproxy/src/gn/out/
             ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
             ~/cronet-go/naiveproxy/src/out/sysroot-build/
-          key: chromium-toolchain-linux-desktop-${{ matrix.go_arch }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
+          key: chromium-toolchain-linux-${{ matrix.go_arch }}-${{ hashFiles('.github/CRONET_GO_VERSION') }}
       - name: Download Chromium toolchain
         run: |-
           set -xeuo pipefail
@@ -1087,13 +1119,18 @@ jobs:
         if: matrix.if
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
-          submodules: 'recursive'
+          fetch-depth: 1
+      - name: Checkout Apple client
+        if: matrix.if
+        run: git submodule update --init --recursive clients/apple
       - name: Setup Go
         if: matrix.if
         uses: actions/setup-go@v5
         with:
           go-version: 1.25.12
+          cache-dependency-path: |
+            go.sum
+            clients/apple/sing-box.xcodeproj/project.pbxproj
       - name: Set tag
         if: matrix.if
         run: |-
@@ -1252,7 +1289,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         with:
-          fetch-depth: 0
+          fetch-depth: 1
       - name: Cache ghr
         uses: actions/cache@v4
         id: cache-ghr
