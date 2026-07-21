@@ -30,6 +30,11 @@ on:
         description: "TestFlight test message"
         required: false
         type: string
+      publish:
+        description: "Publish build outputs"
+        required: true
+        type: boolean
+        default: true
   push:
     branches:
       - stable
@@ -1208,7 +1213,7 @@ jobs:
           go run ./cmd/internal/build_libbox -target apple -platform ${{ matrix.platform }}
           mv Libbox.xcframework clients/apple
       - name: Update macOS version
-        if: matrix.if && matrix.name == 'macOS' && github.event_name == 'workflow_dispatch'
+        if: matrix.if && matrix.name == 'macOS' && github.event_name == 'workflow_dispatch' && inputs.publish
         run: |-
           MACOS_PROJECT_VERSION=$(go run -v ./cmd/internal/app_store_connect next_macos_project_version)
           echo "MACOS_PROJECT_VERSION=$MACOS_PROJECT_VERSION"
@@ -1233,7 +1238,7 @@ jobs:
         env:
           DISABLE_SWIFTLINT: "1"
       - name: Upload to App Store Connect
-        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch'
+        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && inputs.publish
         run: |-
           go run -v ./cmd/internal/app_store_connect cancel_app_store ${{ matrix.platform }}
           cd clients/apple
@@ -1245,7 +1250,7 @@ jobs:
             -authenticationKeyID $ASC_KEY_ID \
             -authenticationKeyIssuerID $ASC_KEY_ISSUER_ID
       - name: Publish to TestFlight
-        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing'
+        if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing' && inputs.publish
         run: |-
           arguments=(publish_testflight "${{ matrix.platform }}")
           if [[ -n "$TEST_MESSAGE" ]]; then
@@ -1258,7 +1263,15 @@ jobs:
         if: matrix.if && matrix.type == 'standalone'
         run: |-
           make -C clients/apple build_macos_pkg
+        env:
+          DISABLE_SWIFTLINT: "1"
+      - name: Notarize standalone packages
+        if: matrix.if && matrix.type == 'standalone' && inputs.publish
+        run: |-
           make -C clients/apple notarize_macos_pkg
+      - name: Prepare standalone packages
+        if: matrix.if && matrix.type == 'standalone'
+        run: |-
           pushd clients/apple/build/SFM.System-universal.xcarchive
           zip -r SFM.dSYMs.zip dSYMs
           popd
@@ -1268,8 +1281,6 @@ jobs:
           cp clients/apple/build/SFM-Intel.pkg "dist/SFM-${VERSION}-Intel.pkg"
           cp clients/apple/build/SFM-Universal.pkg "dist/SFM-${VERSION}-Universal.pkg"
           cp clients/apple/build/SFM.System-universal.xcarchive/SFM.dSYMs.zip "dist/SFM-${VERSION}.dSYMs.zip"
-        env:
-          DISABLE_SWIFTLINT: "1"
       - name: Build jailbreak package
         if: matrix.if && matrix.type == 'jailbreak'
         run: |-
@@ -1284,7 +1295,7 @@ jobs:
           path: 'dist'
   upload:
     name: Upload builds
-    if: "!failure() && github.event_name == 'workflow_dispatch' && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'Windows' || inputs.build == 'Linux' || inputs.build == 'Apple' || inputs.build == 'macOS-standalone' || inputs.build == 'iOS-jailbreak')"
+    if: "!failure() && github.event_name == 'workflow_dispatch' && inputs.publish && (inputs.build == 'All' || inputs.build == 'Binary' || inputs.build == 'Android' || inputs.build == 'Windows' || inputs.build == 'Linux' || inputs.build == 'Apple' || inputs.build == 'macOS-standalone' || inputs.build == 'iOS-jailbreak')"
     runs-on: ubuntu-latest
     permissions:
       contents: write
