@@ -1402,18 +1402,31 @@ jobs:
         if: matrix.if && matrix.type == 'app-store'
         run: |-
           cd clients/apple
+          signing_arguments=()
+          if [[ "$PUBLISH" == 'true' ]]; then
+            signing_arguments=(
+              -allowProvisioningUpdates
+              -authenticationKeyPath "$ASC_KEY_PATH"
+              -authenticationKeyID "$ASC_KEY_ID"
+              -authenticationKeyIssuerID "$ASC_KEY_ISSUER_ID"
+            )
+          else
+            signing_arguments=(
+              CODE_SIGNING_ALLOWED=NO
+              CODE_SIGNING_REQUIRED=NO
+              CODE_SIGN_IDENTITY=
+            )
+          fi
           xcodebuild archive \
             -clonedSourcePackagesDirPath "$RUNNER_TEMP/SourcePackages" \
             -scheme "${{ matrix.scheme }}" \
             -configuration Release \
             -destination "${{ matrix.destination }}" \
             -archivePath "${{ matrix.archive }}" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath $ASC_KEY_PATH \
-            -authenticationKeyID $ASC_KEY_ID \
-            -authenticationKeyIssuerID $ASC_KEY_ISSUER_ID
+            "${signing_arguments[@]}"
         env:
           DISABLE_SWIFTLINT: "1"
+          PUBLISH: ${{ inputs.publish }}
       - name: Upload to App Store Connect
         if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && inputs.publish
         run: |-
