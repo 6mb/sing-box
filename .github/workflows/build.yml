@@ -26,6 +26,10 @@ on:
           - macOS-standalone
           - iOS-jailbreak
           - publish-android
+      test_message:
+        description: "TestFlight test message"
+        required: false
+        type: string
   push:
     branches:
       - stable
@@ -1240,7 +1244,13 @@ jobs:
       - name: Publish to TestFlight
         if: matrix.if && matrix.type == 'app-store' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/testing'
         run: |-
-          go run -v ./cmd/internal/app_store_connect publish_testflight ${{ matrix.platform }}
+          arguments=(publish_testflight "${{ matrix.platform }}")
+          if [[ -n "$TEST_MESSAGE" ]]; then
+            arguments+=("$TEST_MESSAGE")
+          fi
+          go run -v ./cmd/internal/app_store_connect "${arguments[@]}"
+        env:
+          TEST_MESSAGE: ${{ inputs.test_message }}
       - name: Build standalone packages
         if: matrix.if && matrix.type == 'standalone'
         run: |-
