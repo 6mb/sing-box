@@ -160,7 +160,14 @@ func (r *DNSRuleAction) UnmarshalJSONContext(ctx context.Context, data []byte) e
 	if v == nil {
 		return json.UnmarshalDisallowUnknownFields(data, &_DNSRuleAction{})
 	}
-	return badjson.UnmarshallExcludedContext(ctx, data, (*_DNSRuleAction)(r), v)
+	err = badjson.UnmarshallExcludedContext(ctx, data, (*_DNSRuleAction)(r), v)
+	if err != nil {
+		return err
+	}
+	if r.Action == C.RuleActionTypeRoute && r.RouteOptions.Tag != "" {
+		return E.New("`tag` is only available in the `evaluate` action")
+	}
+	return nil
 }
 
 type RouteActionOptions struct {
@@ -204,6 +211,7 @@ func (r *RouteOptionsActionOptions) UnmarshalJSON(data []byte) error {
 
 type DNSRouteActionOptions struct {
 	Server                 string                `json:"server,omitempty"`
+	Tag                    string                `json:"tag,omitempty"`
 	Timeout                badoption.Duration    `json:"timeout,omitempty"`
 	Strategy               DomainStrategy        `json:"strategy,omitempty"`
 	DisableCache           bool                  `json:"disable_cache,omitempty"`

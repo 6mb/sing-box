@@ -69,7 +69,8 @@ var _ adapter.DNSRule = (*DefaultDNSRule)(nil)
 
 type DefaultDNSRule struct {
 	abstractDefaultRule
-	matchResponse bool
+	matchResponse    bool
+	matchResponseTag string
 }
 
 func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options option.DefaultDNSRule, legacyDNSMode bool) (*DefaultDNSRule, error) {
@@ -78,7 +79,8 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 			invert: options.Invert,
 			action: NewDNSRuleAction(logger, options.DNSRuleAction),
 		},
-		matchResponse: options.MatchResponse,
+		matchResponse:    options.MatchResponse.IsEnabled(),
+		matchResponseTag: options.MatchResponse.ResponseTag(),
 	}
 	if len(options.Inbound) > 0 {
 		item := NewInboundRule(options.Inbound)
@@ -377,12 +379,28 @@ func (r *DefaultDNSRule) LegacyPreMatch(metadata *adapter.InboundContext) bool {
 	return r.abstractDefaultRule.Match(metadata)
 }
 
+func (r *DefaultDNSRule) MatchResponseTag() string {
+	return r.matchResponseTag
+}
+
+func (r *DefaultDNSRule) MatchResponseTags() []string {
+	if r.matchResponseTag == "" {
+		return nil
+	}
+	return []string{r.matchResponseTag}
+}
+
 func (r *DefaultDNSRule) matchForMatch(metadata *adapter.InboundContext) bool {
 	if r.matchResponse {
-		if metadata.DNSResponse == nil {
+		response := metadata.DNSResponse
+		if r.matchResponseTag != "" {
+			response = metadata.NamedDNSResponses[r.matchResponseTag]
+		}
+		if response == nil {
 			return r.invert
 		}
 		matchMetadata := *metadata
+		matchMetadata.DNSResponse = response
 		matchMetadata.DestinationAddressMatchFromResponse = true
 		return r.abstractDefaultRule.Match(&matchMetadata)
 	}
@@ -400,6 +418,11 @@ var _ adapter.DNSRule = (*LogicalDNSRule)(nil)
 
 type LogicalDNSRule struct {
 	abstractLogicalRule
+	matchResponseTags []string
+}
+
+func (r *LogicalDNSRule) MatchResponseTags() []string {
+	return r.matchResponseTags
 }
 
 func matchDNSHeadlessRuleForMatch(rule adapter.HeadlessRule, metadata *adapter.InboundContext) bool {
@@ -468,6 +491,15 @@ func NewLogicalDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		}
 		r.rules[i] = rule
 	}
+	for _, subRule := range r.rules {
+		switch typedRule := subRule.(type) {
+		case *DefaultDNSRule:
+			r.matchResponseTags = append(r.matchResponseTags, typedRule.MatchResponseTags()...)
+		case *LogicalDNSRule:
+			r.matchResponseTags = append(r.matchResponseTags, typedRule.MatchResponseTags()...)
+		}
+	}
+	r.matchResponseTags = common.Uniq(r.matchResponseTags)
 	return r, nil
 }
 

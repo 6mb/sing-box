@@ -90,6 +90,7 @@ Will override `dns.client_subnet`.
 {
   "action": "evaluate",
   "server": "",
+  "tag": "",
   "disable_cache": false,
   "disable_optimistic_cache": false,
   "rewrite_ttl": null,
@@ -112,6 +113,13 @@ does not satisfy this requirement, because matching happens before the action ru
 ==Required==
 
 Tag of target server.
+
+#### tag
+
+Tag of the evaluated response.
+
+A tagged response is only referenced via [`match_response`](/configuration/dns/rule/#match_response) with the tag;
+`match_response: true` references the response of the latest `evaluate` action without `tag`.
 
 #### disable_cache
 

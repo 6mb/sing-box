@@ -90,6 +90,7 @@ icon: material/new-box
 {
   "action": "evaluate",
   "server": "",
+  "tag": "",
   "disable_cache": false,
   "disable_optimistic_cache": false,
   "rewrite_ttl": null,
@@ -110,6 +111,13 @@ icon: material/new-box
 ==必填==
 
 目标 DNS 服务器的标签。
+
+#### tag
+
+已评估响应的标签。
+
+带标签的响应仅能通过 [`match_response`](/zh/configuration/dns/rule/#match_response) 以标签引用；
+`match_response: true` 引用最近一条无 `tag` 的 `evaluate` 动作的响应。
 
 #### disable_cache
 

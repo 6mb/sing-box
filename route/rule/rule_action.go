@@ -141,6 +141,7 @@ func NewDNSRuleAction(logger logger.ContextLogger, action option.DNSRuleAction) 
 	case C.RuleActionTypeEvaluate:
 		return &RuleActionEvaluate{
 			Server: action.RouteOptions.Server,
+			Tag:    action.RouteOptions.Tag,
 			RuleActionDNSRouteOptions: RuleActionDNSRouteOptions{
 				Strategy:               C.DomainStrategy(action.RouteOptions.Strategy),
 				Timeout:                time.Duration(action.RouteOptions.Timeout),
@@ -299,6 +300,7 @@ func (r *RuleActionDNSRoute) String() string {
 
 type RuleActionEvaluate struct {
 	Server string
+	Tag    string
 	RuleActionDNSRouteOptions
 }
 
