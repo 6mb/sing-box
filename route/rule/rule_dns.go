@@ -28,6 +28,9 @@ func NewDNSRule(ctx context.Context, logger log.ContextLogger, options option.DN
 		if err != nil {
 			return nil, err
 		}
+		if options.DefaultOptions.Racing && !options.DefaultOptions.MatchResponse.IsEnabled() {
+			return nil, E.New("`racing` requires `match_response`")
+		}
 		switch options.DefaultOptions.Action {
 		case "", C.RuleActionTypeRoute, C.RuleActionTypeEvaluate:
 			if options.DefaultOptions.RouteOptions.Server == "" && checkServer {
@@ -46,6 +49,9 @@ func NewDNSRule(ctx context.Context, logger log.ContextLogger, options option.DN
 		if err != nil {
 			return nil, err
 		}
+		if options.LogicalOptions.Racing {
+			return nil, E.New("`racing` is not supported on logical rules")
+		}
 		switch options.LogicalOptions.Action {
 		case "", C.RuleActionTypeRoute, C.RuleActionTypeEvaluate:
 			if options.LogicalOptions.RouteOptions.Server == "" && checkServer {
@@ -62,6 +68,16 @@ func validateDNSRuleAction(action option.DNSRuleAction) error {
 	if action.Action == C.RuleActionTypeReject && action.RejectOptions.Method == C.RuleActionRejectMethodReply {
 		return E.New("reject method `reply` is not supported for DNS rules")
 	}
+	if action.Racing {
+		switch action.Action {
+		case "", C.RuleActionTypeRoute, C.RuleActionTypeRespond, C.RuleActionTypeReject, C.RuleActionTypePredefined:
+		default:
+			return E.New("`racing` requires a final action")
+		}
+		if action.RouteOptions.Speculative {
+			return E.New("`racing` and `speculative` cannot be combined on the same rule")
+		}
+	}
 	return nil
 }
 
@@ -71,6 +87,7 @@ type DefaultDNSRule struct {
 	abstractDefaultRule
 	matchResponse    bool
 	matchResponseTag string
+	racing           bool
 }
 
 func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options option.DefaultDNSRule, legacyDNSMode bool) (*DefaultDNSRule, error) {
@@ -81,6 +98,7 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		},
 		matchResponse:    options.MatchResponse.IsEnabled(),
 		matchResponseTag: options.MatchResponse.ResponseTag(),
+		racing:           options.Racing,
 	}
 	if len(options.Inbound) > 0 {
 		item := NewInboundRule(options.Inbound)
@@ -390,6 +408,14 @@ func (r *DefaultDNSRule) MatchResponseTags() []string {
 	return []string{r.matchResponseTag}
 }
 
+func (r *DefaultDNSRule) MatchResponseAnonymous() bool {
+	return r.matchResponse && r.matchResponseTag == ""
+}
+
+func (r *DefaultDNSRule) Racing() bool {
+	return r.racing
+}
+
 func (r *DefaultDNSRule) matchForMatch(metadata *adapter.InboundContext) bool {
 	if r.matchResponse {
 		response := metadata.DNSResponse
@@ -418,11 +444,16 @@ var _ adapter.DNSRule = (*LogicalDNSRule)(nil)
 
 type LogicalDNSRule struct {
 	abstractLogicalRule
-	matchResponseTags []string
+	matchResponseTags      []string
+	matchResponseAnonymous bool
 }
 
 func (r *LogicalDNSRule) MatchResponseTags() []string {
 	return r.matchResponseTags
+}
+
+func (r *LogicalDNSRule) MatchResponseAnonymous() bool {
+	return r.matchResponseAnonymous
 }
 
 func matchDNSHeadlessRuleForMatch(rule adapter.HeadlessRule, metadata *adapter.InboundContext) bool {
@@ -495,8 +526,10 @@ func NewLogicalDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		switch typedRule := subRule.(type) {
 		case *DefaultDNSRule:
 			r.matchResponseTags = append(r.matchResponseTags, typedRule.MatchResponseTags()...)
+			r.matchResponseAnonymous = r.matchResponseAnonymous || typedRule.MatchResponseAnonymous()
 		case *LogicalDNSRule:
 			r.matchResponseTags = append(r.matchResponseTags, typedRule.MatchResponseTags()...)
+			r.matchResponseAnonymous = r.matchResponseAnonymous || typedRule.MatchResponseAnonymous()
 		}
 	}
 	r.matchResponseTags = common.Uniq(r.matchResponseTags)

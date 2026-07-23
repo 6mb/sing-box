@@ -3,6 +3,7 @@ package dns
 import (
 	"context"
 	"errors"
+	"maps"
 	"net/netip"
 	"strings"
 	"sync"
@@ -417,23 +418,141 @@ type exchangeWithRulesResult struct {
 const dnsRespondMissingResponseMessage = "respond action requires an evaluated response from a preceding evaluate action"
 
 type dnsRuleWalkState struct {
-	ruleIndex          int
-	effectiveOptions   adapter.DNSQueryOptions
-	evaluatedResponse  *mDNS.Msg
-	evaluatedTransport adapter.DNSTransport
-	namedResponses     map[string]*mDNS.Msg
-	namedTransports    map[string]adapter.DNSTransport
+	ruleIndex        int
+	lastLoggedIndex  int
+	effectiveOptions adapter.DNSQueryOptions
+	anonymousFuture  *dnsEvaluatedFuture
+	namedFutures     map[string]*dnsEvaluatedFuture
+	namedResponses   map[string]*mDNS.Msg
+	namedTransports  map[string]adapter.DNSTransport
+	futures          []*dnsEvaluatedFuture
+	armedRules       []*dnsArmedRule
+	terminalFuture   *dnsEvaluatedFuture
+	terminalIndex    int
+	wake             chan struct{}
 }
 
-type dnsRuleWithMatchResponseTags interface {
+func (s *dnsRuleWalkState) anonymousResponse() *mDNS.Msg {
+	if s.anonymousFuture == nil {
+		return nil
+	}
+	return s.anonymousFuture.view()
+}
+
+type dnsEvaluatedFuture struct {
+	tag       string
+	terminal  bool
+	transport adapter.DNSTransport
+	cancel    context.CancelFunc
+	done      chan struct{}
+	response  *mDNS.Msg
+	err       error
+	settled   bool
+}
+
+func (f *dnsEvaluatedFuture) resolved() bool {
+	select {
+	case <-f.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (f *dnsEvaluatedFuture) view() *mDNS.Msg {
+	if !f.resolved() || f.err != nil {
+		return nil
+	}
+	return f.response
+}
+
+type dnsArmedRule struct {
+	ruleIndex int
+	rule      *R.DefaultDNSRule
+	future    *dnsEvaluatedFuture
+	options   adapter.DNSQueryOptions
+}
+
+type dnsRuleWithResponseBindings interface {
 	MatchResponseTags() []string
+	MatchResponseAnonymous() bool
 }
 
 type dnsPendingExchange struct {
 	transport adapter.DNSTransport
 	options   adapter.DNSQueryOptions
-	evaluate  bool
-	tag       string
+	future    *dnsEvaluatedFuture
+}
+
+type dnsWalkSuspension struct {
+	await   *dnsEvaluatedFuture
+	drain   bool
+	pending *dnsPendingExchange
+}
+
+func (r *Router) launchDNSEvaluate(ctx context.Context, state *dnsRuleWalkState, tag string, transport adapter.DNSTransport, message *mDNS.Msg, options adapter.DNSQueryOptions) *dnsEvaluatedFuture {
+	if state.wake == nil {
+		state.wake = make(chan struct{}, 1)
+	}
+	wake := state.wake
+	exchangeCtx, cancel := context.WithCancel(adapter.OverrideContext(ctx))
+	future := &dnsEvaluatedFuture{
+		tag:       tag,
+		transport: transport,
+		cancel:    cancel,
+		done:      make(chan struct{}),
+	}
+	state.futures = append(state.futures, future)
+	r.client.ExchangeAsync(exchangeCtx, transport, message, r.finalizeExchangeOptions(options), nil, func(response *mDNS.Msg, err error) {
+		future.response = response
+		future.err = err
+		close(future.done)
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	})
+	return future
+}
+
+func (r *Router) settleDNSFutures(ctx context.Context, message *mDNS.Msg, state *dnsRuleWalkState) {
+	for _, future := range state.futures {
+		if future.settled || !future.resolved() {
+			continue
+		}
+		future.settled = true
+		if future.err != nil && !future.terminal {
+			r.logger.ErrorContext(ctx, E.Cause(future.err, "exchange failed for ", FormatQuestion(message.Question[0].String())))
+		}
+		if future.tag == "" {
+			continue
+		}
+		newResponses := make(map[string]*mDNS.Msg, len(state.namedResponses)+1)
+		maps.Copy(newResponses, state.namedResponses)
+		newResponses[future.tag] = future.view()
+		state.namedResponses = newResponses
+		newTransports := make(map[string]adapter.DNSTransport, len(state.namedTransports)+1)
+		maps.Copy(newTransports, state.namedTransports)
+		newTransports[future.tag] = future.transport
+		state.namedTransports = newTransports
+	}
+}
+
+func cancelDNSFutures(state *dnsRuleWalkState) {
+	for _, future := range state.futures {
+		future.cancel()
+	}
+}
+
+func dnsRefusedResponse(message *mDNS.Msg) *mDNS.Msg {
+	return &mDNS.Msg{
+		MsgHdr: mDNS.MsgHdr{
+			Id:       message.Id,
+			Rcode:    mDNS.RcodeRefused,
+			Response: true,
+		},
+		Question: []mDNS.Question{message.Question[0]},
+	}
 }
 
 func (r *Router) finalizeExchangeOptions(options adapter.DNSQueryOptions) adapter.DNSQueryOptions {
@@ -443,47 +562,94 @@ func (r *Router) finalizeExchangeOptions(options adapter.DNSQueryOptions) adapte
 	return options
 }
 
-func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, state *dnsRuleWalkState, allowFakeIP bool) (exchangeWithRulesResult, *dnsPendingExchange) {
+func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, state *dnsRuleWalkState, allowFakeIP bool) (exchangeWithRulesResult, *dnsWalkSuspension) {
 	metadata := adapter.ContextFrom(ctx)
 	if metadata == nil {
 		panic("no context")
 	}
 	for ; state.ruleIndex < len(rules); state.ruleIndex++ {
 		currentRule := rules[state.ruleIndex]
-		if taggedRule, withResponseTags := currentRule.(dnsRuleWithMatchResponseTags); withResponseTags {
-			for _, responseTag := range taggedRule.MatchResponseTags() {
-				if _, evaluated := state.namedResponses[responseTag]; !evaluated {
-					return exchangeWithRulesResult{
-						err: E.New("dns rule[", state.ruleIndex, "]: missing evaluated response for tag: ", responseTag),
-					}, nil
+		var hasBindings bool
+		if bindingRule, withBindings := currentRule.(dnsRuleWithResponseBindings); withBindings {
+			hasBindings = len(bindingRule.MatchResponseTags()) > 0 || bindingRule.MatchResponseAnonymous()
+			if hasBindings {
+				r.settleDNSFutures(ctx, message, state)
+				if defaultRule, isDefault := currentRule.(*R.DefaultDNSRule); isDefault && defaultRule.Racing() {
+					future := state.anonymousFuture
+					if responseTag := defaultRule.MatchResponseTag(); responseTag != "" {
+						future = state.namedFutures[responseTag]
+					}
+					if future != nil && !future.resolved() {
+						r.logger.DebugContext(ctx, "armed[", state.ruleIndex, "] ", currentRule, " => ", currentRule.Action())
+						state.armedRules = append(state.armedRules, &dnsArmedRule{
+							ruleIndex: state.ruleIndex,
+							rule:      defaultRule,
+							future:    future,
+							options:   state.effectiveOptions,
+						})
+						continue
+					}
+				} else {
+					var awaitFuture *dnsEvaluatedFuture
+					for _, responseTag := range bindingRule.MatchResponseTags() {
+						future := state.namedFutures[responseTag]
+						if future != nil && !future.resolved() {
+							awaitFuture = future
+							break
+						}
+					}
+					if awaitFuture == nil && bindingRule.MatchResponseAnonymous() {
+						if future := state.anonymousFuture; future != nil && !future.resolved() {
+							awaitFuture = future
+						}
+					}
+					if awaitFuture != nil {
+						return exchangeWithRulesResult{}, &dnsWalkSuspension{await: awaitFuture}
+					}
 				}
 			}
 		}
 		metadata.ResetRuleCache()
-		metadata.DNSResponse = state.evaluatedResponse
+		metadata.DNSResponse = state.anonymousResponse()
 		metadata.NamedDNSResponses = state.namedResponses
 		metadata.DestinationAddressMatchFromResponse = false
 		if !currentRule.Match(metadata) {
 			continue
 		}
-		r.logRuleMatch(ctx, state.ruleIndex, currentRule)
+		if state.lastLoggedIndex != state.ruleIndex {
+			state.lastLoggedIndex = state.ruleIndex
+			r.logRuleMatch(ctx, state.ruleIndex, currentRule)
+		}
 		switch action := currentRule.Action().(type) {
 		case *R.RuleActionDNSRouteOptions:
 			r.applyDNSRouteOptions(&state.effectiveOptions, *action)
 		case *R.RuleActionEvaluate:
-			queryOptions := state.effectiveOptions
 			transport, loaded := r.transport.Transport(action.Server)
 			if !loaded {
 				r.logger.ErrorContext(ctx, "transport not found: ", action.Server)
 				if action.Tag == "" {
-					state.evaluatedResponse = nil
-					state.evaluatedTransport = nil
+					state.anonymousFuture = nil
 				}
 				continue
 			}
+			if !action.Speculative && len(state.armedRules) > 0 {
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+			}
+			queryOptions := state.effectiveOptions
 			r.applyDNSRouteOptions(&queryOptions, action.RuleActionDNSRouteOptions)
-			return exchangeWithRulesResult{}, &dnsPendingExchange{transport: transport, options: queryOptions, evaluate: true, tag: action.Tag}
+			future := r.launchDNSEvaluate(ctx, state, action.Tag, transport, message, queryOptions)
+			if action.Tag == "" {
+				state.anonymousFuture = future
+			} else {
+				if state.namedFutures == nil {
+					state.namedFutures = make(map[string]*dnsEvaluatedFuture)
+				}
+				state.namedFutures[action.Tag] = future
+			}
 		case *R.RuleActionRespond:
+			if len(state.armedRules) > 0 {
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+			}
 			if defaultRule, isDefault := currentRule.(*R.DefaultDNSRule); isDefault && defaultRule.MatchResponseTag() != "" {
 				namedResponse := state.namedResponses[defaultRule.MatchResponseTag()]
 				if namedResponse == nil {
@@ -496,14 +662,20 @@ func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, mess
 					transport: state.namedTransports[defaultRule.MatchResponseTag()],
 				}, nil
 			}
-			if state.evaluatedResponse == nil {
+			if !hasBindings {
+				if future := state.anonymousFuture; future != nil && !future.resolved() {
+					return exchangeWithRulesResult{}, &dnsWalkSuspension{await: future}
+				}
+			}
+			response := state.anonymousResponse()
+			if response == nil {
 				return exchangeWithRulesResult{
 					err: E.New(dnsRespondMissingResponseMessage),
 				}, nil
 			}
 			return exchangeWithRulesResult{
-				response:  state.evaluatedResponse,
-				transport: state.evaluatedTransport,
+				response:  response,
+				transport: state.anonymousFuture.transport,
 			}, nil
 		case *R.RuleActionDNSRoute:
 			queryOptions := state.effectiveOptions
@@ -515,19 +687,27 @@ func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, mess
 			case dnsRouteStatusSkipped:
 				continue
 			}
-			return exchangeWithRulesResult{}, &dnsPendingExchange{transport: transport, options: queryOptions}
+			if len(state.armedRules) > 0 {
+				if action.Speculative && state.terminalFuture == nil {
+					future := r.launchDNSEvaluate(ctx, state, "", transport, message, queryOptions)
+					future.terminal = true
+					state.terminalFuture = future
+					state.terminalIndex = state.ruleIndex
+				}
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+			}
+			if state.terminalFuture != nil && state.terminalIndex == state.ruleIndex {
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{pending: &dnsPendingExchange{transport: state.terminalFuture.transport, future: state.terminalFuture}}
+			}
+			return exchangeWithRulesResult{}, &dnsWalkSuspension{pending: &dnsPendingExchange{transport: transport, options: queryOptions}}
 		case *R.RuleActionReject:
+			if len(state.armedRules) > 0 {
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+			}
 			switch action.Method {
 			case C.RuleActionRejectMethodDefault:
 				return exchangeWithRulesResult{
-					response: &mDNS.Msg{
-						MsgHdr: mDNS.MsgHdr{
-							Id:       message.Id,
-							Rcode:    mDNS.RcodeRefused,
-							Response: true,
-						},
-						Question: []mDNS.Question{message.Question[0]},
-					},
+					response:     dnsRefusedResponse(message),
 					rejectAction: action,
 				}, nil
 			case C.RuleActionRejectMethodDrop:
@@ -537,82 +717,177 @@ func (r *Router) walkDNSRules(ctx context.Context, rules []adapter.DNSRule, mess
 				}, nil
 			}
 		case *R.RuleActionPredefined:
+			if len(state.armedRules) > 0 {
+				return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+			}
 			return exchangeWithRulesResult{
 				response: action.Response(message),
 			}, nil
 		}
 	}
-	return exchangeWithRulesResult{}, &dnsPendingExchange{transport: r.transport.Default(), options: state.effectiveOptions}
+	if len(state.armedRules) > 0 {
+		return exchangeWithRulesResult{}, &dnsWalkSuspension{drain: true}
+	}
+	return exchangeWithRulesResult{}, &dnsWalkSuspension{pending: &dnsPendingExchange{transport: r.transport.Default(), options: state.effectiveOptions}}
 }
 
 func (r *Router) exchangeWithRules(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, options adapter.DNSQueryOptions, allowFakeIP bool) exchangeWithRulesResult {
-	state := dnsRuleWalkState{effectiveOptions: options}
-	result, pending := r.walkDNSRules(ctx, rules, message, &state, allowFakeIP)
-	if pending == nil {
+	state := dnsRuleWalkState{effectiveOptions: options, lastLoggedIndex: -1}
+	result, suspension := r.walkDNSRules(ctx, rules, message, &state, allowFakeIP)
+	if suspension == nil {
+		cancelDNSFutures(&state)
 		return result
 	}
-	return r.resumeExchangeWithRules(ctx, rules, message, &state, allowFakeIP, pending)
+	return r.resumeExchangeWithRules(ctx, rules, message, &state, allowFakeIP, suspension)
 }
 
-func (r *Router) resumeExchangeWithRules(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, state *dnsRuleWalkState, allowFakeIP bool, pending *dnsPendingExchange) exchangeWithRulesResult {
+func (r *Router) resumeExchangeWithRules(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, state *dnsRuleWalkState, allowFakeIP bool, suspension *dnsWalkSuspension) exchangeWithRulesResult {
+	defer cancelDNSFutures(state)
 	for {
-		response, err := r.client.Exchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil)
-		if !pending.evaluate {
-			return exchangeWithRulesResult{
-				response:  response,
-				transport: pending.transport,
-				err:       err,
+		r.settleDNSFutures(ctx, message, state)
+		sweepResult, sweepPending, committed := r.sweepArmedDNSRules(ctx, message, state, allowFakeIP)
+		if committed {
+			if sweepPending != nil {
+				return r.finishPendingExchange(ctx, message, state, sweepPending)
+			}
+			return sweepResult
+		}
+		if suspension != nil {
+			if suspension.pending != nil {
+				return r.finishPendingExchange(ctx, message, state, suspension.pending)
+			}
+			if (suspension.await != nil && !suspension.await.resolved()) || (suspension.drain && len(state.armedRules) > 0) {
+				select {
+				case <-state.wake:
+				case <-ctx.Done():
+					return exchangeWithRulesResult{err: ctx.Err()}
+				}
+				continue
 			}
 		}
-		if err != nil {
-			r.logger.ErrorContext(ctx, E.Cause(err, "exchange failed for ", FormatQuestion(message.Question[0].String())))
-			if pending.tag == "" {
-				state.evaluatedResponse = nil
-				state.evaluatedTransport = nil
-			} else {
-				delete(state.namedResponses, pending.tag)
-				delete(state.namedTransports, pending.tag)
-			}
-		} else if pending.tag == "" {
-			state.evaluatedResponse = response
-			state.evaluatedTransport = pending.transport
-		} else {
-			if state.namedResponses == nil {
-				state.namedResponses = make(map[string]*mDNS.Msg)
-				state.namedTransports = make(map[string]adapter.DNSTransport)
-			}
-			state.namedResponses[pending.tag] = response
-			state.namedTransports[pending.tag] = pending.transport
-		}
-		state.ruleIndex++
 		var result exchangeWithRulesResult
-		result, pending = r.walkDNSRules(ctx, rules, message, state, allowFakeIP)
-		if pending == nil {
+		result, suspension = r.walkDNSRules(ctx, rules, message, state, allowFakeIP)
+		if suspension == nil {
 			return result
 		}
 	}
 }
 
+func (r *Router) sweepArmedDNSRules(ctx context.Context, message *mDNS.Msg, state *dnsRuleWalkState, allowFakeIP bool) (exchangeWithRulesResult, *dnsPendingExchange, bool) {
+	metadata := adapter.ContextFrom(ctx)
+	for index := 0; index < len(state.armedRules); {
+		armed := state.armedRules[index]
+		if !armed.future.resolved() {
+			index++
+			continue
+		}
+		state.armedRules = append(state.armedRules[:index], state.armedRules[index+1:]...)
+		metadata.ResetRuleCache()
+		if armed.rule.MatchResponseTag() == "" {
+			metadata.DNSResponse = armed.future.view()
+		} else {
+			metadata.DNSResponse = state.anonymousResponse()
+		}
+		metadata.NamedDNSResponses = state.namedResponses
+		metadata.DestinationAddressMatchFromResponse = false
+		if !armed.rule.Match(metadata) {
+			continue
+		}
+		r.logRuleMatch(ctx, armed.ruleIndex, armed.rule)
+		switch action := armed.rule.Action().(type) {
+		case *R.RuleActionRespond:
+			response := armed.future.view()
+			if response == nil {
+				return exchangeWithRulesResult{
+					err: E.New(dnsRespondMissingResponseMessage),
+				}, nil, true
+			}
+			return exchangeWithRulesResult{
+				response:  response,
+				transport: armed.future.transport,
+			}, nil, true
+		case *R.RuleActionDNSRoute:
+			queryOptions := armed.options
+			transport, status := r.resolveDNSRoute(action.Server, action.RuleActionDNSRouteOptions, allowFakeIP, &queryOptions)
+			switch status {
+			case dnsRouteStatusMissing:
+				r.logger.ErrorContext(ctx, "transport not found: ", action.Server)
+				continue
+			case dnsRouteStatusSkipped:
+				continue
+			}
+			return exchangeWithRulesResult{}, &dnsPendingExchange{transport: transport, options: queryOptions}, true
+		case *R.RuleActionReject:
+			switch action.Method {
+			case C.RuleActionRejectMethodDefault:
+				return exchangeWithRulesResult{
+					response:     dnsRefusedResponse(message),
+					rejectAction: action,
+				}, nil, true
+			case C.RuleActionRejectMethodDrop:
+				return exchangeWithRulesResult{
+					rejectAction: action,
+					err:          R.ErrDrop,
+				}, nil, true
+			}
+		case *R.RuleActionPredefined:
+			return exchangeWithRulesResult{
+				response: action.Response(message),
+			}, nil, true
+		}
+	}
+	return exchangeWithRulesResult{}, nil, false
+}
+
+func (r *Router) finishPendingExchange(ctx context.Context, message *mDNS.Msg, state *dnsRuleWalkState, pending *dnsPendingExchange) exchangeWithRulesResult {
+	for _, future := range state.futures {
+		if future != pending.future {
+			future.cancel()
+		}
+	}
+	if pending.future != nil {
+		select {
+		case <-pending.future.done:
+		case <-ctx.Done():
+			return exchangeWithRulesResult{err: ctx.Err()}
+		}
+		return exchangeWithRulesResult{
+			response:  pending.future.view(),
+			transport: pending.future.transport,
+			err:       pending.future.err,
+		}
+	}
+	response, err := r.client.Exchange(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil)
+	return exchangeWithRulesResult{
+		response:  response,
+		transport: pending.transport,
+		err:       err,
+	}
+}
+
 func (r *Router) exchangeWithRulesAsync(ctx context.Context, rules []adapter.DNSRule, message *mDNS.Msg, options adapter.DNSQueryOptions, allowFakeIP bool, callback func(result exchangeWithRulesResult)) {
-	state := dnsRuleWalkState{effectiveOptions: options}
-	result, pending := r.walkDNSRules(ctx, rules, message, &state, allowFakeIP)
-	if pending == nil {
+	state := &dnsRuleWalkState{effectiveOptions: options, lastLoggedIndex: -1}
+	result, suspension := r.walkDNSRules(ctx, rules, message, state, allowFakeIP)
+	if suspension == nil {
+		cancelDNSFutures(state)
 		callback(result)
 		return
 	}
-	if pending.evaluate {
-		go func() {
-			callback(r.resumeExchangeWithRules(ctx, rules, message, &state, allowFakeIP, pending))
-		}()
+	if suspension.pending != nil && suspension.pending.future == nil {
+		cancelDNSFutures(state)
+		pending := suspension.pending
+		r.client.ExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil, func(response *mDNS.Msg, err error) {
+			callback(exchangeWithRulesResult{
+				response:  response,
+				transport: pending.transport,
+				err:       err,
+			})
+		})
 		return
 	}
-	r.client.ExchangeAsync(adapter.OverrideContext(ctx), pending.transport, message, r.finalizeExchangeOptions(pending.options), nil, func(response *mDNS.Msg, err error) {
-		callback(exchangeWithRulesResult{
-			response:  response,
-			transport: pending.transport,
-			err:       err,
-		})
-	})
+	go func() {
+		callback(r.resumeExchangeWithRules(ctx, rules, message, state, allowFakeIP, suspension))
+	}()
 }
 
 func (r *Router) resolveLookupStrategy(options adapter.DNSQueryOptions) C.DomainStrategy {
@@ -1168,6 +1443,7 @@ func validateLegacyDNSModeDisabledRules(router adapter.Router, rules []option.DN
 	var (
 		warnings               []string
 		seenAnonymousEvaluate  bool
+		seenRacing             bool
 		definedTags            = make(map[string]bool)
 		definedTagOrder        []string
 		referencedTags         = make(map[string]bool)
@@ -1178,6 +1454,12 @@ func validateLegacyDNSModeDisabledRules(router adapter.Router, rules []option.DN
 		use, err := validateLegacyDNSModeDisabledRuleTree(router, rule, metadataOverrides)
 		if err != nil {
 			return nil, E.Cause(err, "validate dns rule[", i, "]")
+		}
+		if dnsRuleActionSpeculative(rule) && !seenRacing {
+			warnings = append(warnings, F.ToString("dns rule[", i, "]: `speculative` has no effect without a preceding `racing` rule"))
+		}
+		if dnsRuleRacing(rule) {
+			seenRacing = true
 		}
 		if use.needsAnonymous {
 			if !seenAnonymousEvaluate {
@@ -1304,9 +1586,12 @@ func validateLegacyDNSModeDisabledDefaultRule(router adapter.Router, rule option
 }
 
 func dnsRuleActionDisablesLegacyDNSMode(action option.DNSRuleAction) bool {
+	if action.Racing {
+		return true
+	}
 	switch action.Action {
 	case "", C.RuleActionTypeRoute, C.RuleActionTypeEvaluate:
-		return action.RouteOptions.DisableOptimisticCache
+		return action.RouteOptions.DisableOptimisticCache || action.RouteOptions.Speculative
 	case C.RuleActionTypeRouteOptions:
 		return action.RouteOptionsOptions.DisableOptimisticCache
 	default:
@@ -1361,5 +1646,27 @@ func dnsRuleActionEvaluateTag(rule option.DNSRule) string {
 		return rule.LogicalOptions.RouteOptions.Tag
 	default:
 		return ""
+	}
+}
+
+func dnsRuleActionSpeculative(rule option.DNSRule) bool {
+	switch rule.Type {
+	case "", C.RuleTypeDefault:
+		return rule.DefaultOptions.RouteOptions.Speculative
+	case C.RuleTypeLogical:
+		return rule.LogicalOptions.RouteOptions.Speculative
+	default:
+		return false
+	}
+}
+
+func dnsRuleRacing(rule option.DNSRule) bool {
+	switch rule.Type {
+	case "", C.RuleTypeDefault:
+		return rule.DefaultOptions.Racing
+	case C.RuleTypeLogical:
+		return rule.LogicalOptions.Racing
+	default:
+		return false
 	}
 }

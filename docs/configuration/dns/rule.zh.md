@@ -15,7 +15,8 @@ icon: material/alert-decagram
     :material-plus: [response_extra](#response_extra)  
     :material-plus: [package_name_regex](#package_name_regex)  
     :material-alert: [ip_version](#ip_version)  
-    :material-alert: [query_type](#query_type)
+    :material-alert: [query_type](#query_type)  
+    :material-plus: [racing](#racing)
 
 !!! quote "sing-box 1.13.0 中的更改"
 
@@ -183,6 +184,7 @@ icon: material/alert-decagram
         ],
         "rule_set_ip_cidr_match_source": false,
         "match_response": false,
+        "racing": false,
         "ip_cidr": [
           "10.0.0.0/24",
           "192.168.0.1"
@@ -553,12 +555,33 @@ Available values: `wifi`, `cellular`, `ethernet` and `other`.
 启用响应匹配。启用后，此规则将匹配已评估的响应（由前序 [`evaluate`](/zh/configuration/dns/rule_action/#evaluate) 动作设置），而不仅是匹配原始查询。
 
 可以为 `true` 或 `evaluate` 动作的 `tag`：`true` 匹配最近一条无 `tag` 的 `evaluate` 动作的响应；标签则匹配对应 `evaluate` 动作的响应。
-规则求值时该标签的响应不存在，则请求以错误终止。
+若所引用的查询失败，或其 `evaluate` 规则未执行，则响应条件不匹配（因此启用 `invert` 的规则会命中）。
+
+由于 `evaluate` 查询是异步发出的，带 `match_response` 的规则会等待所引用的查询完成后再进行匹配；
+启用 [`racing`](#racing) 可改为在响应到达时立即判定。
 
 该已评估的响应也可以被后续的 [`respond`](/zh/configuration/dns/rule_action/#respond) 动作直接返回；在带 `match_response` 标签的规则中，`respond` 返回该标签的响应。
 
 响应匹配字段（`response_rcode`、`response_answer`、`response_ns`、`response_extra`）需要此选项。
 当与 `evaluate` 或响应匹配字段一起使用时，`ip_cidr`、`ip_is_private` 和 `ip_accept_any` 也需要此选项。
+
+#### racing
+
+!!! question "自 sing-box 1.14.0 起"
+
+不等待 `match_response` 所引用的查询：该规则在其响应到达时求值，若命中，其动作立即成为最终结果。
+多条 `racing` 规则中，最先命中的响应生效，其余进行中的查询会被取消。
+
+存在尚未得出结果的 `racing` 规则时，仅 `racing` 规则可以立即生效：其他规则命中后，
+其动作会等待这些 `racing` 规则全部得出结果后才生效。会发起新查询的动作（`route`、`evaluate`
+与默认服务器）在等待期间也不会发出查询，除非启用了
+[`speculative`](/zh/configuration/dns/rule_action/#speculative)。规则匹配本身的处理不受等待影响。
+
+要求本规则含 `match_response`，且动作为最终动作（`route`、`respond`、`reject` 或 `predefined`）。
+不可用于逻辑规则。
+
+仅当任一服务器的结果都可接受时，才将它们放入同一组 `racing` 规则；
+若需要固定的优先顺序，请使用不带 `racing` 的规则——查询仍然并行发出，结果按规则顺序采用。
 
 #### ip_accept_any
 

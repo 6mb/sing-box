@@ -8,7 +8,8 @@ icon: material/new-box
     :material-plus: [evaluate](#evaluate)  
     :material-plus: [respond](#respond)  
     :material-plus: [disable_optimistic_cache](#disable_optimistic_cache)  
-    :material-plus: [timeout](#timeout)
+    :material-plus: [timeout](#timeout)  
+    :material-plus: [speculative](#speculative)
 
 !!! quote "sing-box 1.12.0 中的更改"
 
@@ -17,12 +18,15 @@ icon: material/new-box
 
 !!! question "自 sing-box 1.11.0 起"
 
+## 最终动作
+
 ### route
 
 ```json
 {
   "action": "route", // 默认
   "server": "",
+  "speculative": false,
   "strategy": "",
   "disable_cache": false,
   "disable_optimistic_cache": false,
@@ -40,6 +44,20 @@ icon: material/new-box
 
 目标 DNS 服务器的标签。
 
+#### speculative
+
+!!! question "自 sing-box 1.14.0 起"
+
+默认情况下，当存在尚未得出结果的 [`racing`](/zh/configuration/dns/rule/#racing) 规则时，
+会发起新查询的动作（`route`、`evaluate` 与默认服务器）会等待它们全部得出结果后再发出查询，
+以避免不必要的查询。
+
+启用 `speculative` 后立即发出查询；其响应仍然只在所有未决 `racing` 规则均未命中时使用，
+若某条 `racing` 规则命中，该查询会被取消。
+
+默认服务器总是等待；若希望它提前发出，请在规则末尾添加一条显式的 `route` 动作规则，
+指向默认服务器并启用 `speculative`。
+
 #### strategy
 
 !!! question "自 sing-box 1.12.0 起"
@@ -51,73 +69,6 @@ icon: material/new-box
 为此查询设置域名策略。
 
 可选项：`prefer_ipv4` `prefer_ipv6` `ipv4_only` `ipv6_only`。
-
-#### disable_cache
-
-在此查询中禁用缓存。
-
-#### disable_optimistic_cache
-
-!!! question "自 sing-box 1.14.0 起"
-
-在此查询中禁用乐观 DNS 缓存。
-
-#### rewrite_ttl
-
-重写 DNS 回应中的 TTL。
-
-#### timeout
-
-!!! question "自 sing-box 1.14.0 起"
-
-覆盖匹配查询的 DNS 查询超时时间。
-
-将覆盖 `dns.timeout`。
-
-#### client_subnet
-
-默认情况下，将带有指定 IP 前缀的 `edns0-subnet` OPT 附加记录附加到每个查询。
-
-如果值是 IP 地址而不是前缀，则会自动附加 `/32` 或 `/128`。
-
-将覆盖 `dns.client_subnet`.
-
-### evaluate
-
-!!! question "自 sing-box 1.14.0 起"
-
-```json
-{
-  "action": "evaluate",
-  "server": "",
-  "tag": "",
-  "disable_cache": false,
-  "disable_optimistic_cache": false,
-  "rewrite_ttl": null,
-  "timeout": "",
-  "client_subnet": null
-}
-```
-
-`evaluate` 向指定服务器发送 DNS 查询并保存已评估的响应，供后续规则通过 [`match_response`](/zh/configuration/dns/rule/#match_response) 和响应字段进行匹配。与 `route` 不同，它**不会**终止规则评估。
-
-仅允许在顶层 DNS 规则中使用（不可在逻辑子规则内部使用）。
-使用 [`match_response`](/zh/configuration/dns/rule/#match_response) 或响应匹配字段的规则，
-需要位于更早的顶层 `evaluate` 规则之后。规则自身的 `evaluate` 动作不能满足这个条件，
-因为匹配发生在动作执行之前。
-
-#### server
-
-==必填==
-
-目标 DNS 服务器的标签。
-
-#### tag
-
-已评估响应的标签。
-
-带标签的响应仅能通过 [`match_response`](/zh/configuration/dns/rule/#match_response) 以标签引用；
-`match_response: true` 引用最近一条无 `tag` 的 `evaluate` 动作的响应。
 
 #### disable_cache
 
@@ -163,22 +114,8 @@ icon: material/new-box
 
 此动作不会发起新的 DNS 查询，也没有额外选项。
 
-只能用于前面已有顶层 `evaluate` 规则的场景。如果运行时命中该动作时没有已评估的响应，则请求会直接返回错误，而不是继续匹配后续规则。
-
-### route-options
-
-```json
-{
-  "action": "route-options",
-  "disable_cache": false,
-  "disable_optimistic_cache": false,
-  "rewrite_ttl": null,
-  "timeout": "",
-  "client_subnet": null
-}
-```
-
-`route-options` 为路由设置选项。
+只能用于前面已有顶层 `evaluate` 规则的场景。该动作会等待所引用的查询完成；
+如果运行时命中该动作时没有已评估的响应，则请求会直接返回错误，而不是继续匹配后续规则。
 
 ### reject
 
@@ -255,3 +192,99 @@ icon: material/new-box
 #### extra
 
 用于作为额外记录响应的文本 DNS 记录列表。
+
+## 非最终动作
+
+### evaluate
+
+!!! question "自 sing-box 1.14.0 起"
+
+```json
+{
+  "action": "evaluate",
+  "server": "",
+  "tag": "",
+  "speculative": false,
+  "disable_cache": false,
+  "disable_optimistic_cache": false,
+  "rewrite_ttl": null,
+  "timeout": "",
+  "client_subnet": null
+}
+```
+
+`evaluate` 向指定服务器发送 DNS 查询并保存已评估的响应，供后续规则通过 [`match_response`](/zh/configuration/dns/rule/#match_response) 和响应字段进行匹配。与 `route` 不同，它**不会**终止规则评估。
+
+查询是异步发出的：规则处理立即继续，引用该响应的规则会等待查询完成
+（除非该规则启用了 [`racing`](/zh/configuration/dns/rule/#racing)）。
+多条 `evaluate` 动作发出的查询并行进行。
+
+仅允许在顶层 DNS 规则中使用（不可在逻辑子规则内部使用）。
+使用 [`match_response`](/zh/configuration/dns/rule/#match_response) 或响应匹配字段的规则，
+需要位于更早的顶层 `evaluate` 规则之后。规则自身的 `evaluate` 动作不能满足这个条件，
+因为匹配发生在动作执行之前。
+
+#### server
+
+==必填==
+
+目标 DNS 服务器的标签。
+
+#### tag
+
+已评估响应的标签。
+
+带标签的响应仅能通过 [`match_response`](/zh/configuration/dns/rule/#match_response) 以标签引用；
+`match_response: true` 引用最近一条无 `tag` 的 `evaluate` 动作的响应。
+
+#### speculative
+
+!!! question "自 sing-box 1.14.0 起"
+
+与 [route](#speculative) 动作上的 `speculative` 相同：立即发出查询，
+而不是等待未决的 [`racing`](/zh/configuration/dns/rule/#racing) 规则得出结果。
+
+#### disable_cache
+
+在此查询中禁用缓存。
+
+#### disable_optimistic_cache
+
+!!! question "自 sing-box 1.14.0 起"
+
+在此查询中禁用乐观 DNS 缓存。
+
+#### rewrite_ttl
+
+重写 DNS 回应中的 TTL。
+
+#### timeout
+
+!!! question "自 sing-box 1.14.0 起"
+
+覆盖匹配查询的 DNS 查询超时时间。
+
+将覆盖 `dns.timeout`。
+
+#### client_subnet
+
+默认情况下，将带有指定 IP 前缀的 `edns0-subnet` OPT 附加记录附加到每个查询。
+
+如果值是 IP 地址而不是前缀，则会自动附加 `/32` 或 `/128`。
+
+将覆盖 `dns.client_subnet`.
+
+### route-options
+
+```json
+{
+  "action": "route-options",
+  "disable_cache": false,
+  "disable_optimistic_cache": false,
+  "rewrite_ttl": null,
+  "timeout": "",
+  "client_subnet": null
+}
+```
+
+`route-options` 为路由设置选项。

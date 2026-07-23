@@ -98,6 +98,7 @@ func (r *RuleAction) UnmarshalJSON(data []byte) error {
 
 type _DNSRuleAction struct {
 	Action              string                       `json:"action,omitempty"`
+	Racing              bool                         `json:"racing,omitempty"`
 	RouteOptions        DNSRouteActionOptions        `json:"-"`
 	RouteOptionsOptions DNSRouteOptionsActionOptions `json:"-"`
 	RejectOptions       RejectActionOptions          `json:"-"`
@@ -212,6 +213,7 @@ func (r *RouteOptionsActionOptions) UnmarshalJSON(data []byte) error {
 type DNSRouteActionOptions struct {
 	Server                 string                `json:"server,omitempty"`
 	Tag                    string                `json:"tag,omitempty"`
+	Speculative            bool                  `json:"speculative,omitempty"`
 	Timeout                badoption.Duration    `json:"timeout,omitempty"`
 	Strategy               DomainStrategy        `json:"strategy,omitempty"`
 	DisableCache           bool                  `json:"disable_cache,omitempty"`

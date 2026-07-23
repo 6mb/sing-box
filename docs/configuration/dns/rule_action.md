@@ -8,7 +8,8 @@ icon: material/new-box
     :material-plus: [evaluate](#evaluate)  
     :material-plus: [respond](#respond)  
     :material-plus: [disable_optimistic_cache](#disable_optimistic_cache)  
-    :material-plus: [timeout](#timeout)
+    :material-plus: [timeout](#timeout)  
+    :material-plus: [speculative](#speculative)
 
 !!! quote "Changes in sing-box 1.12.0"
 
@@ -17,12 +18,15 @@ icon: material/new-box
 
 !!! question "Since sing-box 1.11.0"
 
+## Final actions
+
 ### route
 
 ```json
 {
   "action": "route",  // default
   "server": "",
+  "speculative": false,
   "strategy": "",
   "disable_cache": false,
   "disable_optimistic_cache": false,
@@ -40,6 +44,20 @@ icon: material/new-box
 
 Tag of target server.
 
+#### speculative
+
+!!! question "Since sing-box 1.14.0"
+
+By default, when there are pending [`racing`](/configuration/dns/rule/#racing) rules that have not
+received their responses yet, an action that sends a new query (`route`, `evaluate`, and the default
+server) waits until all of them have been decided before sending, to avoid unnecessary queries.
+
+Enable `speculative` to send the query immediately; the response is still only used after all
+pending `racing` rules missed, and the query is canceled when a `racing` rule matches.
+
+The default server always waits; to send it early, add an explicit last rule with a `route` action
+targeting the default server and `speculative` enabled.
+
 #### strategy
 
 !!! question "Since sing-box 1.12.0"
@@ -51,75 +69,6 @@ Tag of target server.
 Set domain strategy for this query.
 
 One of `prefer_ipv4` `prefer_ipv6` `ipv4_only` `ipv6_only`.
-
-#### disable_cache
-
-Disable cache and save cache in this query.
-
-#### disable_optimistic_cache
-
-!!! question "Since sing-box 1.14.0"
-
-Disable optimistic DNS caching in this query.
-
-#### rewrite_ttl
-
-Rewrite TTL in DNS responses.
-
-#### timeout
-
-!!! question "Since sing-box 1.14.0"
-
-Override the DNS query timeout for matched queries.
-
-Will override `dns.timeout`.
-
-#### client_subnet
-
-Append a `edns0-subnet` OPT extra record with the specified IP prefix to every query by default.
-
-If value is an IP address instead of prefix, `/32` or `/128` will be appended automatically.
-
-Will override `dns.client_subnet`.
-
-### evaluate
-
-!!! question "Since sing-box 1.14.0"
-
-```json
-{
-  "action": "evaluate",
-  "server": "",
-  "tag": "",
-  "disable_cache": false,
-  "disable_optimistic_cache": false,
-  "rewrite_ttl": null,
-  "timeout": "",
-  "client_subnet": null
-}
-```
-
-`evaluate` sends a DNS query to the specified server and saves the evaluated response for subsequent rules
-to match against using [`match_response`](/configuration/dns/rule/#match_response) and response fields.
-Unlike `route`, it does **not** terminate rule evaluation.
-
-Only allowed on top-level DNS rules (not inside logical sub-rules).
-Rules that use [`match_response`](/configuration/dns/rule/#match_response) or Response Match Fields
-require a preceding top-level rule with `evaluate` action. A rule's own `evaluate` action
-does not satisfy this requirement, because matching happens before the action runs.
-
-#### server
-
-==Required==
-
-Tag of target server.
-
-#### tag
-
-Tag of the evaluated response.
-
-A tagged response is only referenced via [`match_response`](/configuration/dns/rule/#match_response) with the tag;
-`match_response: true` references the response of the latest `evaluate` action without `tag`.
 
 #### disable_cache
 
@@ -165,22 +114,9 @@ Will override `dns.client_subnet`.
 
 This action does not send a new DNS query and has no extra options.
 
-Only allowed after a preceding top-level `evaluate` rule. If the action is reached without an evaluated response at runtime, the request fails with an error instead of falling through to later rules.
-
-### route-options
-
-```json
-{
-  "action": "route-options",
-  "disable_cache": false,
-  "disable_optimistic_cache": false,
-  "rewrite_ttl": null,
-  "timeout": "",
-  "client_subnet": null
-}
-```
-
-`route-options` set options for routing.
+Only allowed after a preceding top-level `evaluate` rule. The action waits for the referenced query to
+complete; if it is reached without an evaluated response at runtime, the request fails with an error
+instead of falling through to later rules.
 
 ### reject
 
@@ -257,3 +193,101 @@ List of text DNS record to respond as name servers.
 #### extra
 
 List of text DNS record to respond as extra records.
+
+## Non-final actions
+
+### evaluate
+
+!!! question "Since sing-box 1.14.0"
+
+```json
+{
+  "action": "evaluate",
+  "server": "",
+  "tag": "",
+  "speculative": false,
+  "disable_cache": false,
+  "disable_optimistic_cache": false,
+  "rewrite_ttl": null,
+  "timeout": "",
+  "client_subnet": null
+}
+```
+
+`evaluate` sends a DNS query to the specified server and saves the evaluated response for subsequent rules
+to match against using [`match_response`](/configuration/dns/rule/#match_response) and response fields.
+Unlike `route`, it does **not** terminate rule evaluation.
+
+The query is sent asynchronously: rule processing continues immediately, and a rule that references
+the response waits for the query to complete (unless [`racing`](/configuration/dns/rule/#racing) is
+enabled on that rule). Queries sent by multiple `evaluate` actions run in parallel.
+
+Only allowed on top-level DNS rules (not inside logical sub-rules).
+Rules that use [`match_response`](/configuration/dns/rule/#match_response) or Response Match Fields
+require a preceding top-level rule with `evaluate` action. A rule's own `evaluate` action
+does not satisfy this requirement, because matching happens before the action runs.
+
+#### server
+
+==Required==
+
+Tag of target server.
+
+#### tag
+
+Tag of the evaluated response.
+
+A tagged response is only referenced via [`match_response`](/configuration/dns/rule/#match_response) with the tag;
+`match_response: true` references the response of the latest `evaluate` action without `tag`.
+
+#### speculative
+
+!!! question "Since sing-box 1.14.0"
+
+Same as `speculative` on the [route](#speculative) action: send the query immediately instead of
+waiting for pending [`racing`](/configuration/dns/rule/#racing) rules to be decided.
+
+#### disable_cache
+
+Disable cache and save cache in this query.
+
+#### disable_optimistic_cache
+
+!!! question "Since sing-box 1.14.0"
+
+Disable optimistic DNS caching in this query.
+
+#### rewrite_ttl
+
+Rewrite TTL in DNS responses.
+
+#### timeout
+
+!!! question "Since sing-box 1.14.0"
+
+Override the DNS query timeout for matched queries.
+
+Will override `dns.timeout`.
+
+#### client_subnet
+
+Append a `edns0-subnet` OPT extra record with the specified IP prefix to every query by default.
+
+If value is an IP address instead of prefix, `/32` or `/128` will be appended automatically.
+
+Will override `dns.client_subnet`.
+
+### route-options
+
+```json
+{
+  "action": "route-options",
+  "disable_cache": false,
+  "disable_optimistic_cache": false,
+  "rewrite_ttl": null,
+  "timeout": "",
+  "client_subnet": null
+}
+```
+
+`route-options` set options for routing.
