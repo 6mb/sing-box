@@ -29,6 +29,7 @@ func RegisterTransport(registry *dns.TransportRegistry) {
 var (
 	_ adapter.DNSTransport                    = (*Transport)(nil)
 	_ adapter.DNSTransportWithPreferredDomain = (*Transport)(nil)
+	_ adapter.DNSTransportWithSearchDomain    = (*Transport)(nil)
 )
 
 type Transport struct {
@@ -53,6 +54,7 @@ type Transport struct {
 type dhcpTransport interface {
 	adapter.DNSTransport
 	Fetch() []M.Socksaddr
+	SearchDomains() []string
 }
 
 func NewTransport(ctx context.Context, logger log.ContextLogger, tag string, options option.LocalDNSServerOptions) (adapter.DNSTransport, error) {
@@ -165,7 +167,30 @@ func (t *Transport) PreferredDomain(domain string) bool {
 			return true
 		}
 	}
-	return t.hasNeighborHost(domain) || mdns.IsLocalDomain(domain)
+	if t.hasNeighborHost(domain) || mdns.IsLocalDomain(domain) {
+		return true
+	}
+	for _, suffix := range t.searchDomains() {
+		if mDNS.IsSubDomain(mDNS.CanonicalName(suffix), domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Transport) HasSearchDomain() bool {
+	return len(t.searchDomains()) > 0
+}
+
+func (t *Transport) searchDomains() []string {
+	if t.dhcpTransport != nil {
+		return t.dhcpTransport.SearchDomains()
+	}
+	systemConfig := getSystemDNSConfig(t.ctx)
+	if systemConfig == nil {
+		return nil
+	}
+	return systemConfig.search
 }
 
 func (t *Transport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
@@ -220,5 +245,5 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callba
 		t.systemExchangeAsync(ctx, message, callback)
 		return
 	}
-	t.exchangeAsync(ctx, message, question.Name, callback)
+	t.exchangeAsync(ctx, message, dns.FqdnToDomain(question.Name), callback)
 }

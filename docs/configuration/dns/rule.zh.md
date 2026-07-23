@@ -16,7 +16,9 @@ icon: material/alert-decagram
     :material-plus: [package_name_regex](#package_name_regex)  
     :material-alert: [ip_version](#ip_version)  
     :material-alert: [query_type](#query_type)  
-    :material-plus: [racing](#racing)
+    :material-plus: [racing](#racing)  
+    :material-plus: [domain_label_count](#domain_label_count)  
+    :material-plus: [search_domain_available](#search_domain_available)
 
 !!! quote "sing-box 1.13.0 中的更改"
 
@@ -100,6 +102,7 @@ icon: material/alert-decagram
         "domain_regex": [
           "^stun\\..+"
         ],
+        "domain_label_count": 1,
         "source_ip_cidr": [
           "10.0.0.0/24",
           "192.168.0.1"
@@ -170,6 +173,9 @@ icon: material/alert-decagram
         ],
         "preferred_by": [
           "local",
+          "ts-dns"
+        ],
+        "search_domain_available": [
           "ts-dns"
         ],
         "wifi_ssid": [
@@ -313,6 +319,14 @@ DNS 查询类型。值可以为整数或者类型名称字符串。
 #### domain_regex
 
 匹配域名正则表达式。
+
+#### domain_label_count
+
+!!! question "自 sing-box 1.14.0 起"
+
+匹配查询名中的 label 数量。
+
+`printer` 有 1 个 label；`printer.corp.example.com` 有 4 个。
 
 #### geosite
 
@@ -504,11 +518,27 @@ Available values: `wifi`, `cellular`, `ethernet` and `other`.
 | 类型            | 匹配                                                          |
 |---------------|-------------------------------------------------------------|
 | `hosts`       | 匹配预定义条目和 hosts 文件中的条目                                       |
-| `local`       | 匹配 hosts 中的条目、邻居解析得到的主机名以及 mDNS 本地域名                         |
+| `local`       | 匹配 hosts 中的条目、邻居解析得到的主机名、mDNS 本地域名以及系统 search domain 后缀      |
+| `dhcp`        | 匹配通过 DHCP 获取的 search domain 后缀                              |
 | `mdns`        | 匹配 mDNS 本地域名（`*.local.` 以及 IPv4/IPv6 链路本地反向区域）              |
-| `tailscale`   | 匹配 MagicDNS 主机和 DNS 路由后缀                                    |
-| `openconnect` | 匹配 VPN 服务器推送的分流 DNS 和搜索域                                  |
-| `resolved`    | 匹配 systemd-resolved 链路中的分流域名和搜索域                            |
+| `tailscale`   | 匹配 MagicDNS 主机、DNS 路由后缀以及 search domain 后缀                  |
+| `openvpn`     | 匹配 VPN 服务器推送的分流 DNS 和 search domain 后缀                         |
+| `openconnect` | 匹配 VPN 服务器推送的分流 DNS 和 search domain 后缀                         |
+| `resolved`    | 匹配 systemd-resolved 链路中的分流域名和 search domain 后缀                  |
+
+#### search_domain_available
+
+!!! question "自 sing-box 1.14.0 起"
+
+当指定的 DNS 服务器当前持有至少一个 search domain 时匹配。
+
+支持的 DNS 服务器类型：`local`、`dhcp`、`tailscale`、`openvpn`、`openconnect`、`resolved`。
+
+与 `preferred_by` 不同，此规则项不检查查询名。与 [`domain_label_count`](#domain_label_count)
+组合使用，可以仅在服务器实际持有 search domain 时，将非全限定名查询路由到能展开它们的服务器。
+
+对于 `tailscale`、`openvpn` 与 `openconnect` 服务器，展开单 label 查询还需要在服务器上启用
+`accept_search_domain`。
 
 #### wifi_ssid
 

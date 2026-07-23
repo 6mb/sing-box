@@ -34,6 +34,7 @@ func RegisterTransport(registry *dns.TransportRegistry) {
 var (
 	_ adapter.DNSTransport                    = (*Transport)(nil)
 	_ adapter.DNSTransportWithPreferredDomain = (*Transport)(nil)
+	_ adapter.DNSTransportWithSearchDomain    = (*Transport)(nil)
 )
 
 type Transport struct {
@@ -209,6 +210,19 @@ func (t *Transport) PreferredDomain(domain string) bool {
 	return false
 }
 
+func (t *Transport) HasSearchDomain() bool {
+	t.service.linkAccess.RLock()
+	defer t.service.linkAccess.RUnlock()
+	for _, link := range t.service.links {
+		for _, linkDomain := range link.domain {
+			if linkDomain.Domain != "." && !linkDomain.RoutingOnly {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (t *Transport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
 	done := make(chan struct{})
 	var (
@@ -258,7 +272,7 @@ func (t *Transport) ExchangeAsync(ctx context.Context, message *mDNS.Msg, callba
 		callback(dns.FixedResponseStatus(message, mDNS.RcodeNameError), nil)
 		return
 	}
-	names := servers.Link.nameList(t.ndots, question.Name)
+	names := servers.Link.nameList(t.ndots, dns.FqdnToDomain(question.Name))
 	if len(names) == 0 {
 		callback(nil, E.New("invalid domain: ", question.Name))
 		return

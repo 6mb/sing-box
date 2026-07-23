@@ -122,6 +122,7 @@ type RawDefaultDNSRule struct {
 	DomainSuffix             badoption.Listable[string]                                                  `json:"domain_suffix,omitempty"`
 	DomainKeyword            badoption.Listable[string]                                                  `json:"domain_keyword,omitempty"`
 	DomainRegex              badoption.Listable[string]                                                  `json:"domain_regex,omitempty"`
+	DomainLabelCount         badoption.Listable[uint32]                                                  `json:"domain_label_count,omitempty"`
 	SourceIPCIDR             badoption.Listable[string]                                                  `json:"source_ip_cidr,omitempty"`
 	SourceIPIsPrivate        bool                                                                        `json:"source_ip_is_private,omitempty"`
 	SourcePort               badoption.Listable[uint16]                                                  `json:"source_port,omitempty"`
@@ -148,6 +149,7 @@ type RawDefaultDNSRule struct {
 	SourceMACAddress         badoption.Listable[string]                                                  `json:"source_mac_address,omitempty"`
 	SourceHostname           badoption.Listable[string]                                                  `json:"source_hostname,omitempty"`
 	PreferredBy              badoption.Listable[string]                                                  `json:"preferred_by,omitempty"`
+	SearchDomainAvailable    badoption.Listable[string]                                                  `json:"search_domain_available,omitempty"`
 	RuleSet                  badoption.Listable[string]                                                  `json:"rule_set,omitempty"`
 	RuleSetIPCIDRMatchSource bool                                                                        `json:"rule_set_ip_cidr_match_source,omitempty"`
 	MatchResponse            *DNSRuleMatchResponse                                                       `json:"match_response,omitempty"`

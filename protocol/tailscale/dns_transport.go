@@ -262,6 +262,7 @@ func (t *DNSTransport) PreferredDomain(domain string) bool {
 	t.access.RLock()
 	hosts := t.hosts
 	routes := t.routes
+	searchDomains := t.searchDomains
 	t.access.RUnlock()
 	if _, loaded := hosts[domain]; loaded {
 		return true
@@ -271,7 +272,18 @@ func (t *DNSTransport) PreferredDomain(domain string) bool {
 			return true
 		}
 	}
+	for _, suffix := range searchDomains {
+		if mDNS.IsSubDomain(suffix, domain) {
+			return true
+		}
+	}
 	return false
+}
+
+func (t *DNSTransport) HasSearchDomain() bool {
+	t.access.RLock()
+	defer t.access.RUnlock()
+	return len(t.searchDomains) > 0
 }
 
 func (t *DNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {

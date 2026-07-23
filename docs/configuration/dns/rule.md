@@ -16,7 +16,9 @@ icon: material/alert-decagram
     :material-plus: [package_name_regex](#package_name_regex)  
     :material-alert: [ip_version](#ip_version)  
     :material-alert: [query_type](#query_type)  
-    :material-plus: [racing](#racing)
+    :material-plus: [racing](#racing)  
+    :material-plus: [domain_label_count](#domain_label_count)  
+    :material-plus: [search_domain_available](#search_domain_available)
 
 !!! quote "Changes in sing-box 1.13.0"
 
@@ -100,6 +102,7 @@ icon: material/alert-decagram
         "domain_regex": [
           "^stun\\..+"
         ],
+        "domain_label_count": 1,
         "source_ip_cidr": [
           "10.0.0.0/24",
           "192.168.0.1"
@@ -170,6 +173,9 @@ icon: material/alert-decagram
         ],
         "preferred_by": [
           "local",
+          "ts-dns"
+        ],
+        "search_domain_available": [
           "ts-dns"
         ],
         "wifi_ssid": [
@@ -321,6 +327,14 @@ Match domain using keyword.
 #### domain_regex
 
 Match domain using regular expression.
+
+#### domain_label_count
+
+!!! question "Since sing-box 1.14.0"
+
+Match the number of labels in the query name.
+
+`printer` has one label; `printer.corp.example.com` has four.
 
 #### geosite
 
@@ -509,14 +523,31 @@ Match source device hostname from DHCP leases.
 
 Match specified DNS servers' preferred domains.
 
-| Type          | Match                                                                        |
-|---------------|------------------------------------------------------------------------------|
-| `hosts`       | Match predefined entries and entries in hosts files                          |
-| `local`       | Match hosts entries, neighbor-resolved hosts, and mDNS local domains         |
-| `mdns`        | Match mDNS local domains (`*.local.` and IPv4/IPv6 link-local reverse zones) |
-| `tailscale`   | Match MagicDNS hosts and DNS route suffixes                                  |
-| `openconnect` | Match split DNS and search domains pushed by the VPN server                  |
-| `resolved`    | Match split DNS and search domains from systemd-resolved links               |
+| Type          | Match                                                                                               |
+|---------------|-----------------------------------------------------------------------------------------------------|
+| `hosts`       | Match predefined entries and entries in hosts files                                                 |
+| `local`       | Match hosts entries, neighbor-resolved hosts, mDNS local domains, and system search domain suffixes |
+| `dhcp`        | Match search domain suffixes acquired via DHCP                                                      |
+| `mdns`        | Match mDNS local domains (`*.local.` and IPv4/IPv6 link-local reverse zones)                        |
+| `tailscale`   | Match MagicDNS hosts, DNS route suffixes, and search domain suffixes                                |
+| `openvpn`     | Match split DNS and search domain suffixes pushed by the VPN server                                         |
+| `openconnect` | Match split DNS and search domain suffixes pushed by the VPN server                                         |
+| `resolved`    | Match split DNS and search domain suffixes from systemd-resolved links                                      |
+
+#### search_domain_available
+
+!!! question "Since sing-box 1.14.0"
+
+Match if the specified DNS servers currently have at least one search domain.
+
+Supported DNS server types: `local`, `dhcp`, `tailscale`, `openvpn`, `openconnect`, `resolved`.
+
+Unlike `preferred_by`, this item does not check the query name. Combine it with
+[`domain_label_count`](#domain_label_count) to route unqualified name queries to a server
+that can expand them, only while the server actually holds search domains.
+
+For `tailscale`, `openvpn` and `openconnect` servers, expanding single-label queries
+also requires `accept_search_domain` to be enabled on the server.
 
 #### wifi_ssid
 

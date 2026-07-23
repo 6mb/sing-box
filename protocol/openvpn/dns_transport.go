@@ -288,6 +288,12 @@ func (t *DNSTransport) PreferredDomain(domain string) bool {
 	return false
 }
 
+func (t *DNSTransport) HasSearchDomain() bool {
+	t.access.RLock()
+	defer t.access.RUnlock()
+	return len(t.searchDomains) > 0
+}
+
 func (t *DNSTransport) Exchange(ctx context.Context, message *mDNS.Msg) (*mDNS.Msg, error) {
 	done := make(chan struct{})
 	var response *mDNS.Msg

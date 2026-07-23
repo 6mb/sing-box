@@ -94,6 +94,11 @@ type DNSTransportWithPreferredDomain interface {
 	PreferredDomain(domain string) bool
 }
 
+type DNSTransportWithSearchDomain interface {
+	DNSTransport
+	HasSearchDomain() bool
+}
+
 type DNSTransportRegistry interface {
 	option.DNSTransportOptionsRegistry
 	CreateDNSTransport(ctx context.Context, logger log.ContextLogger, tag string, transportType string, options any) (DNSTransport, error)

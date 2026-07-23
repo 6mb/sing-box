@@ -158,6 +158,11 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 		rule.destinationAddressItems = append(rule.destinationAddressItems, item)
 		rule.allItems = append(rule.allItems, item)
 	}
+	if len(options.DomainLabelCount) > 0 {
+		item := NewDomainLabelCountItem(options.DomainLabelCount)
+		rule.items = append(rule.items, item)
+		rule.allItems = append(rule.allItems, item)
+	}
 	if len(options.Geosite) > 0 { //nolint:staticcheck
 		return nil, E.New("geosite database is deprecated in sing-box 1.8.0 and removed in sing-box 1.12.0")
 	}
@@ -347,6 +352,11 @@ func NewDefaultDNSRule(ctx context.Context, logger log.ContextLogger, options op
 	}
 	if len(options.PreferredBy) > 0 {
 		item := NewPreferredByDNSItem(ctx, options.PreferredBy)
+		rule.items = append(rule.items, item)
+		rule.allItems = append(rule.allItems, item)
+	}
+	if len(options.SearchDomainAvailable) > 0 {
+		item := NewSearchDomainAvailableItem(ctx, options.SearchDomainAvailable)
 		rule.items = append(rule.items, item)
 		rule.allItems = append(rule.allItems, item)
 	}

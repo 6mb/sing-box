@@ -102,7 +102,7 @@ type Endpoint struct {
 
 	cfg           *wgcfg.Config
 	dnsCfg        *tsDNS.Config
-	routeDomains  common.TypedValue[map[string]bool]
+	routeDomains  common.TypedValue[[]string]
 	routePrefixes atomic.Pointer[netipx.IPSet]
 
 	acceptRoutes               bool
@@ -895,10 +895,16 @@ func (t *Endpoint) NewPacketConnectionEx(ctx context.Context, conn N.PacketConn,
 
 func (t *Endpoint) PreferredDomain(metadata *adapter.InboundContext, domain string) bool {
 	routeDomains := t.routeDomains.Load()
-	if routeDomains == nil {
+	if len(routeDomains) == 0 {
 		return false
 	}
-	return routeDomains[strings.ToLower(domain)]
+	canonicalDomain := mDNS.CanonicalName(domain)
+	for _, suffix := range routeDomains {
+		if mDNS.IsSubDomain(suffix, canonicalDomain) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *Endpoint) PreferredAddress(metadata *adapter.InboundContext, address netip.Addr) bool {
@@ -923,12 +929,16 @@ func (t *Endpoint) onReconfig(cfg *wgcfg.Config, routerCfg *router.Config, dnsCf
 	t.cfg = cfg
 	t.dnsCfg = dnsCfg
 
-	routeDomains := make(map[string]bool)
+	routeDomainSet := make(map[string]bool)
 	for fqdn := range dnsCfg.Routes {
-		routeDomains[fqdn.WithoutTrailingDot()] = true
+		routeDomainSet[fqdn.WithTrailingDot()] = true
 	}
 	for _, fqdn := range dnsCfg.SearchDomains {
-		routeDomains[fqdn.WithoutTrailingDot()] = true
+		routeDomainSet[fqdn.WithTrailingDot()] = true
+	}
+	routeDomains := make([]string, 0, len(routeDomainSet))
+	for routeDomain := range routeDomainSet {
+		routeDomains = append(routeDomains, routeDomain)
 	}
 	t.routeDomains.Store(routeDomains)
 

@@ -39,7 +39,11 @@ func RegisterTransport(registry *dns.TransportRegistry) {
 	dns.RegisterTransport[option.DHCPDNSServerOptions](registry, C.DNSTypeDHCP, NewTransport)
 }
 
-var _ adapter.DNSTransport = (*Transport)(nil)
+var (
+	_ adapter.DNSTransport                    = (*Transport)(nil)
+	_ adapter.DNSTransportWithPreferredDomain = (*Transport)(nil)
+	_ adapter.DNSTransportWithSearchDomain    = (*Transport)(nil)
+)
 
 var errInterfaceIsCellular = E.New("interface is cellular")
 
@@ -191,6 +195,30 @@ func (t *Transport) exchangeCold(ctx context.Context, message *mDNS.Msg, callbac
 		return
 	}
 	t.exchangeWithTransports(ctx, message, serverTransports, callback)
+}
+
+func (t *Transport) PreferredDomain(domain string) bool {
+	t.transportLock.RLock()
+	search := t.search
+	t.transportLock.RUnlock()
+	for _, suffix := range search {
+		if mDNS.IsSubDomain(mDNS.CanonicalName(suffix), domain) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Transport) SearchDomains() []string {
+	t.transportLock.RLock()
+	defer t.transportLock.RUnlock()
+	return t.search
+}
+
+func (t *Transport) HasSearchDomain() bool {
+	t.transportLock.RLock()
+	defer t.transportLock.RUnlock()
+	return len(t.search) > 0
 }
 
 func (t *Transport) Fetch() []M.Socksaddr {
