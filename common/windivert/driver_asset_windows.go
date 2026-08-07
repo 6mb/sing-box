@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows && !with_external_windivert
 
 package windivert
 
@@ -11,25 +11,28 @@ import (
 	"strconv"
 
 	E "github.com/sagernet/sing/common/exceptions"
-
-	"golang.org/x/sys/windows"
 )
 
-func extractVerified() (string, *os.File, error) {
-	if len(sysBytes) == 0 {
-		return "", nil, E.New("windivert: unsupported architecture ", runtime.GOARCH)
+func driverFilePath() (string, error) {
+	if driverAssetName == "" {
+		return "", E.New("windivert: unsupported architecture ", runtime.GOARCH)
 	}
-
 	base, err := os.UserCacheDir()
 	if err != nil {
-		return "", nil, E.Cause(err, "windivert: locate user cache dir")
+		return "", E.Cause(err, "windivert: locate user cache dir")
 	}
-	dir := filepath.Join(base, "sing-box", "windivert", "v"+AssetVersion)
-	err = os.MkdirAll(dir, 0o755)
+	return filepath.Join(base, "sing-box", "windivert", "v"+AssetVersion, driverAssetName), nil
+}
+
+func openVerifiedDriver() (string, *os.File, error) {
+	target, err := driverFilePath()
 	if err != nil {
-		return "", nil, E.Cause(err, "windivert: mkdir ", dir)
+		return "", nil, err
 	}
-	target := filepath.Join(dir, driverSysName())
+	err = os.MkdirAll(filepath.Dir(target), 0o755)
+	if err != nil {
+		return "", nil, E.Cause(err, "windivert: mkdir ", filepath.Dir(target))
+	}
 
 	for attempt := 0; ; attempt++ {
 		sysFile, err := openDriverFile(target)
@@ -63,26 +66,6 @@ func extractVerified() (string, *os.File, error) {
 			return "", nil, err
 		}
 	}
-}
-
-func openDriverFile(path string) (*os.File, error) {
-	pathW, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, err
-	}
-	handle, err := windows.CreateFile(
-		pathW,
-		windows.GENERIC_READ,
-		windows.FILE_SHARE_READ,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL,
-		0,
-	)
-	if err != nil {
-		return nil, err
-	}
-	return os.NewFile(uintptr(handle), path), nil
 }
 
 func writeDriverFile(target string) error {
