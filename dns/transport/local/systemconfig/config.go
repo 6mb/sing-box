@@ -1,4 +1,4 @@
-package local
+package systemconfig
 
 import (
 	"net/netip"
@@ -13,44 +13,44 @@ import (
 	mDNS "github.com/miekg/dns"
 )
 
-var defaultNS = []M.Socksaddr{
+var defaultServers = []M.Socksaddr{
 	M.SocksaddrFrom(netip.AddrFrom4([4]byte{127, 0, 0, 1}), 53),
 	M.SocksaddrFrom(netip.IPv6Loopback(), 53),
 }
 
-type dnsConfig struct {
-	servers       []M.Socksaddr
-	search        []string
-	ndots         int
-	timeout       time.Duration
-	attempts      int
-	rotate        bool
+type Config struct {
+	Servers       []M.Socksaddr
+	Search        []string
+	Ndots         int
+	Timeout       time.Duration
+	Attempts      int
+	Rotate        bool
 	soffset       uint32
-	singleRequest bool
-	useTCP        bool
-	trustAD       bool
+	SingleRequest bool
+	UseTCP        bool
+	TrustAD       bool
 }
 
-func (c *dnsConfig) equal(other *dnsConfig) bool {
-	return slices.Equal(c.servers, other.servers) &&
-		slices.Equal(c.search, other.search) &&
-		c.ndots == other.ndots &&
-		c.timeout == other.timeout &&
-		c.attempts == other.attempts &&
-		c.rotate == other.rotate &&
-		c.singleRequest == other.singleRequest &&
-		c.useTCP == other.useTCP &&
-		c.trustAD == other.trustAD
+func (c *Config) Equal(other *Config) bool {
+	return slices.Equal(c.Servers, other.Servers) &&
+		slices.Equal(c.Search, other.Search) &&
+		c.Ndots == other.Ndots &&
+		c.Timeout == other.Timeout &&
+		c.Attempts == other.Attempts &&
+		c.Rotate == other.Rotate &&
+		c.SingleRequest == other.SingleRequest &&
+		c.UseTCP == other.UseTCP &&
+		c.TrustAD == other.TrustAD
 }
 
-func (c *dnsConfig) serverOffset() uint32 {
-	if c.rotate {
+func (c *Config) ServerOffset() uint32 {
+	if c.Rotate {
 		return atomic.AddUint32(&c.soffset, 1) - 1
 	}
 	return 0
 }
 
-func (c *dnsConfig) nameList(name string) []string {
+func (c *Config) NameList(name string) []string {
 	l := len(name)
 	rooted := l > 0 && name[l-1] == '.'
 	if l > 254 || l == 254 && !rooted {
@@ -64,14 +64,14 @@ func (c *dnsConfig) nameList(name string) []string {
 		return []string{name}
 	}
 
-	hasNdots := strings.Count(name, ".") >= c.ndots
+	hasNdots := strings.Count(name, ".") >= c.Ndots
 	name += "."
 
-	names := make([]string, 0, 1+len(c.search))
+	names := make([]string, 0, 1+len(c.Search))
 	if hasNdots && !avoidDNS(name) {
 		names = append(names, name)
 	}
-	for _, suffix := range c.search {
+	for _, suffix := range c.Search {
 		fqdn := name + suffix
 		if !avoidDNS(fqdn) && len(fqdn) <= 254 {
 			names = append(names, fqdn)
@@ -90,7 +90,7 @@ func avoidDNS(name string) bool {
 	return strings.HasSuffix(strings.TrimSuffix(name, "."), ".onion")
 }
 
-func dnsDefaultSearch() []string {
+func defaultSearch() []string {
 	hostname, err := os.Hostname()
 	if err != nil {
 		return nil

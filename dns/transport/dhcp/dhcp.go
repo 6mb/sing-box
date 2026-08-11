@@ -39,7 +39,10 @@ func RegisterTransport(registry *dns.TransportRegistry) {
 	dns.RegisterTransport[option.DHCPDNSServerOptions](registry, C.DNSTypeDHCP, NewTransport)
 }
 
-var _ adapter.DNSTransport = (*Transport)(nil)
+var (
+	_ adapter.DNSTransport                = (*Transport)(nil)
+	_ adapter.DNSTransportWithEnvironment = (*Transport)(nil)
+)
 
 var errInterfaceIsCellular = E.New("interface is cellular")
 
@@ -133,6 +136,12 @@ func (t *Transport) Reset() {
 	t.servers = nil
 	t.closeServerTransports()
 	t.transportLock.Unlock()
+}
+
+func (t *Transport) Environment() []string {
+	t.transportLock.RLock()
+	defer t.transportLock.RUnlock()
+	return common.Map(t.servers, M.Socksaddr.String)
 }
 
 func (t *Transport) closeServerTransports() {

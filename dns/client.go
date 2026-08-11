@@ -3,8 +3,10 @@ package dns
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"net"
 	"net/netip"
+	"strconv"
 	"time"
 
 	"github.com/sagernet/sing-box/adapter"
@@ -87,13 +89,44 @@ type dnsCacheKey struct {
 	dns.Question
 	transportTag string
 	clientSubnet netip.Prefix
+	environment  uint64
 }
 
 func (k dnsCacheKey) persistentName() string {
-	if !k.clientSubnet.IsValid() {
-		return k.transportTag
+	name := k.transportTag
+	if k.clientSubnet.IsValid() {
+		name += "\x00" + k.clientSubnet.String()
 	}
-	return k.transportTag + "\x00" + k.clientSubnet.String()
+	if k.environment != 0 {
+		name += "\x01" + strconv.FormatUint(k.environment, 36)
+	}
+	return name
+}
+
+func (c *Client) newCacheKey(transport adapter.DNSTransport, question dns.Question, message *dns.Msg, options adapter.DNSQueryOptions) dnsCacheKey {
+	cacheKey := dnsCacheKey{Question: question, transportTag: transport.Tag(), clientSubnet: c.effectiveClientSubnet(message, options)}
+	environmentTransport, withEnvironment := transport.(adapter.DNSTransportWithEnvironment)
+	if withEnvironment {
+		cacheKey.environment = environmentHash(environmentTransport.Environment())
+	}
+	return cacheKey
+}
+
+func (c *Client) environmentChanged(transport adapter.DNSTransport, key dnsCacheKey) bool {
+	environmentTransport, withEnvironment := transport.(adapter.DNSTransportWithEnvironment)
+	return withEnvironment && environmentHash(environmentTransport.Environment()) != key.environment
+}
+
+func environmentHash(environment []string) uint64 {
+	if len(environment) == 0 {
+		return 0
+	}
+	digest := fnv.New64a()
+	for _, entry := range environment {
+		digest.Write([]byte(entry))
+		digest.Write([]byte{0})
+	}
+	return digest.Sum64()
 }
 
 func (c *Client) effectiveClientSubnet(message *dns.Msg, options adapter.DNSQueryOptions) netip.Prefix {
@@ -231,7 +264,7 @@ func (c *Client) beginExchange(ctx context.Context, transport adapter.DNSTranspo
 		disableCache:    disableCache,
 	}
 	if !disableCache {
-		cacheKey := dnsCacheKey{Question: question, transportTag: transport.Tag(), clientSubnet: c.effectiveClientSubnet(message, options)}
+		cacheKey := c.newCacheKey(transport, question, message, options)
 		operation.cacheKey = cacheKey
 		cond, loaded := c.cacheLock.LoadOrStore(cacheKey, make(chan struct{}))
 		if loaded {
@@ -302,7 +335,7 @@ func (c *Client) finishExchange(transport adapter.DNSTransport, operation *excha
 		}
 	}
 	timeToLive := applyResponseOptions(question, response, operation.options)
-	if !disableCache {
+	if !disableCache && !c.environmentChanged(transport, operation.cacheKey) {
 		c.storeCache(operation.cacheKey, response, timeToLive)
 	}
 	response.Id = operation.messageId
@@ -476,7 +509,7 @@ func (c *Client) lookupToExchange(ctx context.Context, transport adapter.DNSTran
 
 func (c *Client) questionCache(ctx context.Context, transport adapter.DNSTransport, message *dns.Msg, options adapter.DNSQueryOptions, responseChecker func(response *dns.Msg) bool) ([]netip.Addr, error) {
 	question := message.Question[0]
-	cacheKey := dnsCacheKey{Question: question, transportTag: transport.Tag(), clientSubnet: c.effectiveClientSubnet(message, options)}
+	cacheKey := c.newCacheKey(transport, question, message, options)
 	response, _, isStale := c.loadResponse(cacheKey)
 	if response == nil {
 		return nil, ErrNotCached
@@ -611,6 +644,9 @@ func (c *Client) backgroundRefreshDNS(transport adapter.DNSTransport, key dnsCac
 				return
 			}
 		} else if response.Rcode != dns.RcodeSuccess && response.Rcode != dns.RcodeNameError {
+			return
+		}
+		if c.environmentChanged(transport, key) {
 			return
 		}
 		timeToLive := applyResponseOptions(key.Question, response, options)
