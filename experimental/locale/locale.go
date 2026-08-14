@@ -39,6 +39,8 @@ type Locale struct {
 	TailscaleStopped        string
 	TailscaleStarting       string
 	TailscaleRunning        string
+	TaildropReceiving       string
+	TaildropReceived        string
 	VPNConnecting           string
 	VPNAuthentication       string
 	VPNConnected            string
@@ -59,6 +61,8 @@ var defaultLocale = &Locale{
 	TailscaleStopped:        "Stopped",
 	TailscaleStarting:       "Starting",
 	TailscaleRunning:        "Running",
+	TaildropReceiving:       "Receiving %s from %s",
+	TaildropReceived:        "%s received from %s",
 	VPNConnecting:           "Connecting",
 	VPNAuthentication:       "Authentication required",
 	VPNConnected:            "Connected",

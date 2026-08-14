@@ -34,7 +34,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-const APIVersion = 3
+const APIVersion = 4
 
 const urlTestPushMinInterval = 250 * time.Millisecond
 
@@ -1625,14 +1625,18 @@ func tailscaleEndpointStatusToProto(tag string, s *adapter.TailscaleEndpointStat
 		}
 	}
 	result := &TailscaleEndpointStatus{
-		EndpointTag:    tag,
-		BackendState:   s.BackendState,
-		StateText:      selectedLocale.TailscaleStateText(s.BackendState),
-		AuthURL:        s.AuthURL,
-		NetworkName:    s.NetworkName,
-		MagicDNSSuffix: s.MagicDNSSuffix,
-		UserGroups:     userGroups,
-		KeyAuth:        s.KeyAuth,
+		EndpointTag:        tag,
+		BackendState:       s.BackendState,
+		StateText:          selectedLocale.TailscaleStateText(s.BackendState),
+		AuthURL:            s.AuthURL,
+		NetworkName:        s.NetworkName,
+		MagicDNSSuffix:     s.MagicDNSSuffix,
+		UserGroups:         userGroups,
+		KeyAuth:            s.KeyAuth,
+		CanShareFiles:      s.CanShareFiles,
+		WaitingFileCount:   s.WaitingFileCount,
+		ReceivingFileCount: s.ReceivingFileCount,
+		UnreadFileCount:    s.UnreadFileCount,
 	}
 	if s.Self != nil {
 		result.Self = tailscalePeerToProto(s.Self)
@@ -1645,22 +1649,23 @@ func tailscaleEndpointStatusToProto(tag string, s *adapter.TailscaleEndpointStat
 
 func tailscalePeerToProto(peer *adapter.TailscalePeer) *TailscalePeer {
 	return &TailscalePeer{
-		StableID:       peer.StableID,
-		HostName:       peer.HostName,
-		DnsName:        peer.DNSName,
-		Os:             peer.OS,
-		TailscaleIPs:   peer.TailscaleIPs,
-		SshHostKeys:    peer.SSHHostKeys,
-		Online:         peer.Online,
-		ExitNode:       peer.ExitNode,
-		ExitNodeOption: peer.ExitNodeOption,
-		ShareeNode:     peer.ShareeNode,
-		Expired:        peer.Expired,
-		Active:         peer.Active,
-		RxBytes:        peer.RxBytes,
-		TxBytes:        peer.TxBytes,
-		KeyExpiry:      peer.KeyExpiry,
-		LastSeen:       peer.LastSeen,
+		StableID:        peer.StableID,
+		HostName:        peer.HostName,
+		DnsName:         peer.DNSName,
+		Os:              peer.OS,
+		TailscaleIPs:    peer.TailscaleIPs,
+		SshHostKeys:     peer.SSHHostKeys,
+		Online:          peer.Online,
+		ExitNode:        peer.ExitNode,
+		ExitNodeOption:  peer.ExitNodeOption,
+		ShareeNode:      peer.ShareeNode,
+		Expired:         peer.Expired,
+		Active:          peer.Active,
+		CanReceiveFiles: peer.CanReceiveFiles,
+		RxBytes:         peer.RxBytes,
+		TxBytes:         peer.TxBytes,
+		KeyExpiry:       peer.KeyExpiry,
+		LastSeen:        peer.LastSeen,
 	}
 }
 
@@ -1676,35 +1681,9 @@ func (s *StartedService) StartTailscalePing(
 	boxService := s.instance
 	s.serviceAccess.RUnlock()
 
-	var provider adapter.TailscaleEndpoint
-	if request.EndpointTag != "" {
-		endpoint, err := resolveTailscaleEndpoint(boxService, request.EndpointTag)
-		if err != nil {
-			return err
-		}
-		pingProvider, loaded := endpoint.(adapter.TailscaleEndpoint)
-		if !loaded {
-			return status.Error(codes.FailedPrecondition, "endpoint does not support ping")
-		}
-		provider = pingProvider
-	} else {
-		endpointManager := service.FromContext[adapter.EndpointManager](boxService.ctx)
-		if endpointManager == nil {
-			return status.Error(codes.FailedPrecondition, "endpoint manager not available")
-		}
-		for _, endpoint := range endpointManager.Endpoints() {
-			if endpoint.Type() != C.TypeTailscale {
-				continue
-			}
-			pingProvider, loaded := endpoint.(adapter.TailscaleEndpoint)
-			if loaded {
-				provider = pingProvider
-				break
-			}
-		}
-		if provider == nil {
-			return status.Error(codes.NotFound, "no Tailscale endpoint found")
-		}
+	provider, _, err := resolveTailscaleProvider(boxService, request.EndpointTag)
+	if err != nil {
+		return err
 	}
 
 	return provider.StartTailscalePing(server.Context(), request.PeerIP, func(result *adapter.TailscalePingResult) {
@@ -1712,6 +1691,7 @@ func (s *StartedService) StartTailscalePing(
 			LatencyMs:      result.LatencyMs,
 			IsDirect:       result.IsDirect,
 			Endpoint:       result.Endpoint,
+			PeerRelay:      result.PeerRelay,
 			DerpRegionID:   result.DERPRegionID,
 			DerpRegionCode: result.DERPRegionCode,
 			Error:          result.Error,

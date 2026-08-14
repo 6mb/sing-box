@@ -14,6 +14,8 @@ func init() {
 		TailscaleStopped:        "已停止",
 		TailscaleStarting:       "啟動中",
 		TailscaleRunning:        "執行中",
+		TaildropReceiving:       "正在接收來自 %[2]s 的 %[1]s",
+		TaildropReceived:        "已收到來自 %[2]s 的 %[1]s",
 		VPNConnecting:           "正在連線",
 		VPNAuthentication:       "需要認證",
 		VPNConnected:            "已連線",
