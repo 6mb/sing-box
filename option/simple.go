@@ -19,6 +19,15 @@ type HTTPMixedInboundOptions struct {
 	InboundTLSOptionsContainer
 }
 
+type HTTPInboundOptions struct {
+	ListenOptions
+	Users          []auth.User           `json:"users,omitempty"`
+	DomainResolver *DomainResolveOptions `json:"domain_resolver,omitempty"`
+	SetSystemProxy bool                  `json:"set_system_proxy,omitempty"`
+	Network        NetworkList           `json:"network,omitempty"`
+	InboundTLSOptionsContainer
+}
+
 type SOCKSOutboundOptions struct {
 	DialerOptions
 	ServerOptions

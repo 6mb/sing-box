@@ -8,13 +8,13 @@ import (
 
 	"github.com/sagernet/sing-box/adapter"
 	C "github.com/sagernet/sing-box/constant"
+	sHTTP "github.com/sagernet/sing-box/transport/http"
 	E "github.com/sagernet/sing/common/exceptions"
 	M "github.com/sagernet/sing/common/metadata"
-	"github.com/sagernet/sing/protocol/http"
 )
 
 func HTTPHost(_ context.Context, metadata *adapter.InboundContext, reader io.Reader) error {
-	request, err := http.ReadRequest(std_bufio.NewReader(reader))
+	request, err := sHTTP.ReadRequest(std_bufio.NewReader(reader))
 	if err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			return E.Cause1(ErrNeedMoreData, err)

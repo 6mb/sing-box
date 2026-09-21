@@ -7,6 +7,7 @@
 
   ... // 监听字段
 
+  "network": "",
   "users": [
     {
       "username": "admin",
@@ -23,6 +24,14 @@
 参阅 [监听字段](/zh/configuration/shared/listen/)。
 
 ### 字段
+
+#### network
+
+!!! question "自 sing-box 1.15.0 起"
+
+监听的网络协议，`tcp` `udp` 之一。
+
+默认所有。
 
 #### tls
 

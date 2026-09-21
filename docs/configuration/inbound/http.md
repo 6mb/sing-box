@@ -7,6 +7,7 @@
   
   ... // Listen Fields
   
+  "network": "",
   "users": [
     {
       "username": "admin",
@@ -23,6 +24,14 @@
 See [Listen Fields](/configuration/shared/listen/) for details.
 
 ### Fields
+
+#### network
+
+!!! question "Since sing-box 1.15.0"
+
+Listen network, one of `tcp` `udp`.
+
+Both if empty.
 
 #### tls
 

@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	C "github.com/sagernet/sing-box/constant"
+	sHTTP "github.com/sagernet/sing-box/transport/http"
 	"github.com/sagernet/sing/common/logger"
-	sHTTP "github.com/sagernet/sing/protocol/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/render"
