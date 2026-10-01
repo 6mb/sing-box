@@ -103,29 +103,20 @@ func (s *Store) Name() string {
 	return "certificate"
 }
 
-func (s *Store) Start(stage adapter.StartStage) error {
-	if stage != adapter.StartStateStart {
-		return nil
-	}
-	if s.watcher != nil {
-		return s.watcher.Start()
+func (s *Store) Start(stage adapter.StartStage, scope *adapter.Scope) error {
+	switch stage {
+	case adapter.StartStateInitialize:
+		scope.Add(s.closePlatform)
+	case adapter.StartStateStart:
+		if s.watcher != nil {
+			err := s.watcher.Start()
+			if err != nil {
+				return err
+			}
+			scope.Add(s.watcher.Close)
+		}
 	}
 	return nil
-}
-
-func (s *Store) Close() error {
-	watcher := s.watcher
-	s.watcher = nil
-
-	var closeErr error
-	if watcher != nil {
-		closeErr = watcher.Close()
-	}
-	platformErr := s.closePlatform()
-	if platformErr != nil {
-		closeErr = platformErr
-	}
-	return closeErr
 }
 
 func (s *Store) Pool() *x509.CertPool {
